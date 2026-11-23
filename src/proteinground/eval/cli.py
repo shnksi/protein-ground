@@ -18,7 +18,13 @@ from proteinground.eval.agent import Arm, MessagesClient, run_episode
 from proteinground.eval.cost import episode_cost_usd
 from proteinground.eval.goldcheck import check
 from proteinground.eval.grade import grade
-from proteinground.eval.report import load_records, markdown, summarise
+from proteinground.eval.report import (
+    comparison_line,
+    load_records,
+    markdown,
+    paired,
+    summarise,
+)
 from proteinground.eval.schema import load_questions
 from proteinground.fetch import Fetcher, Mode
 
@@ -107,8 +113,14 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_report(args: argparse.Namespace) -> int:
-    summaries = [summarise(load_records(Path(d))) for d in args.runs]
-    text = markdown([s for s in summaries if s["items"]])
+    runs = [records for d in args.runs if (records := load_records(Path(d)))]
+    summaries = [summarise(records) for records in runs]
+    comparisons = [
+        comparison_line(summaries[0], summary, result)
+        for records, summary in zip(runs[1:], summaries[1:], strict=True)
+        if (result := paired(runs[0], records))
+    ]
+    text = markdown(summaries, comparisons)
     if args.out:
         args.out.write_text(text)
     print(text)
