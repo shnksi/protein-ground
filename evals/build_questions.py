@@ -50,6 +50,24 @@ LENGTH = ["P04637", "P00533", "Q99ZW2", "P0DTC2", "P15056"]
 GENE_LOOKUP = [("BRAF", "P15056"), ("MB", "P02144")]
 # Valid-format IDs to try for "this entry does not exist" items, first two 404s win.
 ABSENT_PDB_CANDIDATES = ["9ZZZ", "9ZZY", "9ZYZ", "9YZZ", "8ZZZ", "9ZZX", "9ZXZ", "9XZZ"]
+# Calls the tests replay for tools no question exercises: residue numbering, variants,
+# isoforms and an obsolete entry. They add records to the snapshot; no gold answer uses them.
+EXTRA_CALLS: list[tuple[str, dict[str, Any]]] = [
+    ("map_structure_residue", {"pdb_id": "1IEP", "chain": "A", "residue_number": 315}),
+    ("map_structure_residue", {"pdb_id": "1IEP", "chain": "A", "residue_number": 224}),
+    ("map_structure_residue", {"pdb_id": "1IEP", "chain": "B", "uniprot_position": 400}),
+    ("map_structure_residue", {"pdb_id": "4HHB", "chain": "B", "residue_number": 6}),
+    ("map_structure_residue", {"pdb_id": "6OIM", "chain": "A", "residue_number": 12}),
+    (
+        "map_structure_residue",
+        {"pdb_id": "1PPB", "chain": "H", "residue_number": 60, "insertion_code": "A"},
+    ),
+    ("get_variants", {"accession": "P01116", "start": 12}),
+    ("get_variants", {"accession": "P01308", "start": 3}),
+    ("get_sequence_window", {"accession": "P04637-2", "start": 330, "end": 341}),
+    ("get_sequence_window", {"accession": "P04637-99", "start": 1, "end": 1}),
+    ("get_structure", {"pdb_id": "1HHB"}),
+]
 METHOD_CATEGORY = {
     "X-RAY DIFFRACTION": "xray",
     "ELECTRON MICROSCOPY": "em",
@@ -512,6 +530,9 @@ def prewarm(fetcher: Fetcher, questions: list[Question]) -> None:
             run_tool(fetcher, "get_structure", {"pdb_id": ref.pdb_id})
     for gene, _ in GENE_LOOKUP:
         run_tool(fetcher, "search_proteins", {"query": gene, "taxon_id": 9606})
+    for name, arguments in EXTRA_CALLS:
+        text, is_error = run_tool(fetcher, name, arguments)
+        assert not is_error, f"{name}({arguments}) failed: {text}"
 
 
 def main() -> int:

@@ -10,6 +10,8 @@ from conftest import ROOT, SNAPSHOT
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
+from proteinground.tools import TOOLS
+
 
 async def _session_roundtrip() -> tuple[list[str], dict[str, object]]:
     params = StdioServerParameters(
@@ -29,6 +31,6 @@ async def _session_roundtrip() -> tuple[list[str], dict[str, object]]:
 
 def test_stdio_server_lists_tools_and_answers_from_the_snapshot() -> None:
     names, structured = asyncio.run(_session_roundtrip())
-    assert "get_structure" in names and len(names) == 7
+    assert names == list(TOOLS)
     data = structured["data"]
     assert isinstance(data, dict) and data["methods"] == ["ELECTRON MICROSCOPY"]

@@ -72,7 +72,9 @@ def test_structures_sorted_best_resolution_first(offline: Fetcher) -> None:
 def test_structure_entry_maps_chains_and_ligands(offline: Fetcher) -> None:
     result = pdb.get_structure(offline, "1iep")
     assert result.found and result.data is not None
-    assert result.data.polymer_entities[0].uniprot_accessions == ["P00520"]
+    polymer = result.data.polymer_entities[0]
+    assert polymer.uniprot_accessions == ["P00520"]
+    assert (polymer.chains, polymer.organism, polymer.length) == (["A", "B"], "Mus musculus", 293)
     ligands = {lig.comp_id: lig.name for lig in result.data.ligands}
     assert "STI" in ligands
     assert "additive" in (ligands.get("CL") or "")
@@ -89,13 +91,13 @@ def test_absent_and_malformed_ids_are_not_found(offline: Fetcher) -> None:
 def test_alphafold_summary(offline: Fetcher) -> None:
     result = alphafold.get_alphafold_summary(offline, "P04637")
     assert result.found and result.data is not None
-    bands = (
-        result.data.fraction_very_high
-        + result.data.fraction_confident
-        + result.data.fraction_low
-        + result.data.fraction_very_low
-    )
-    assert abs(bands - 1.0) < 0.01
+    bands = [
+        result.data.fraction_very_high,
+        result.data.fraction_confident,
+        result.data.fraction_low,
+        result.data.fraction_very_low,
+    ]
+    assert abs(sum(b for b in bands if b is not None) - 1.0) < 0.01 and None not in bands
     assert result.sources[0].record_id == "AF-P04637-F1"
     assert all(r.end - r.start + 1 >= 10 for r in result.data.low_confidence_regions)
 

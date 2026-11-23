@@ -21,11 +21,16 @@ from urllib.parse import urlsplit
 
 import httpx
 
-USER_AGENT = "proteinground/0.1 (+https://github.com/shnksi/protein-ground)"
+from proteinground.version import __version__
+
+USER_AGENT = f"proteinground/{__version__} (+https://github.com/shnksi/protein-ground)"
 KEEP_HEADERS = ("x-uniprot-release", "x-uniprot-release-date", "x-total-results")
-# Statuses that describe the record, not the transport. They are cached like a 200,
-# so "this does not exist" replays offline too.
+# Statuses that are an answer rather than a transport failure: returned without a retry.
 TERMINAL_STATUSES = frozenset({200, 400, 404, 410})
+# Of those, the ones that describe the record. They are cached, so "this does not exist"
+# replays offline too. A 400 describes our request (a renamed field, a malformed query),
+# never the record, so it is neither cached nor read as "not found".
+CACHED_STATUSES = frozenset({200, 404, 410})
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 
 
@@ -48,6 +53,22 @@ class UpstreamError(RuntimeError):
     """The database did not answer usefully after retries."""
 
 
+class RejectedRequestError(UpstreamError):
+    """The database rejected the request itself (HTTP 400, or a GraphQL error).
+
+    That is a fault in the query or a change in the upstream API. It says nothing about
+    whether the record exists, so it must never be reported as "not found".
+    """
+
+
+class MalformedRecordError(UpstreamError):
+    """The database answered, but the record lacks a field the tool needs."""
+
+
+class InvalidInputError(ValueError):
+    """The caller's arguments cannot be turned into a lookup."""
+
+
 @dataclass(frozen=True)
 class Response:
     url: str
@@ -60,6 +81,37 @@ class Response:
     @property
     def ok(self) -> bool:
         return self.status == 200
+
+    def upstream_message(self) -> str:
+        """What the database said about a rejected request, when it said anything."""
+        body = self.body
+        if isinstance(body, dict):
+            for key in ("messages", "errors"):
+                items = body.get(key)
+                if isinstance(items, list) and items:
+                    first = items[0]
+                    text = first.get("message") if isinstance(first, dict) else first
+                    return str(text)[:300]
+            for key in ("error", "message"):
+                if body.get(key):
+                    return str(body[key])[:300]
+        return ""
+
+
+def raise_if_rejected(response: Response, what: str) -> None:
+    """Turn an HTTP 400 into an error, so it is never mistaken for a missing record."""
+    if response.status != 400:
+        return
+    said = response.upstream_message()
+    raise RejectedRequestError(
+        f"{what}: the database rejected the request (HTTP 400"
+        + (f": {said}" if said else "")
+        + "). This is a problem with the query, not evidence that the record is missing."
+    )
+
+
+def is_graphql_error(body: Any) -> bool:
+    return isinstance(body, dict) and bool(body.get("errors"))
 
 
 def cache_path(cache_dir: Path, url: str) -> Path:
@@ -124,7 +176,9 @@ class Fetcher:
             self.misses.append(url)
             return self._fetch(url)
         response = self._fetch(url)
-        if self.cache_dir is not None:
+        # A GraphQL error arrives as HTTP 200; like a 400 it describes the request.
+        cacheable = response.status in CACHED_STATUSES and not is_graphql_error(response.body)
+        if self.cache_dir is not None and cacheable:
             self._write(response)
         return response
 
@@ -204,7 +258,10 @@ class Fetcher:
 
 def _parse_body(raw: httpx.Response) -> Any:
     if raw.status_code != 200:
-        return None
+        try:  # keep the database's own explanation of a 400 or 404 when it gives one
+            return raw.json()
+        except ValueError:
+            return None
     try:
         return raw.json()
     except ValueError as exc:
