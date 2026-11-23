@@ -18,6 +18,7 @@ from proteinground.fetch import Fetcher
 from proteinground.tools import anthropic_tool_defs, run_tool
 
 Arm = Literal["tools", "closed_book"]
+Prompt = Literal["primed", "unprimed"]
 
 SUBMIT_TOOL: dict[str, Any] = {
     "name": "submit_answer",
@@ -71,6 +72,62 @@ SYSTEM_PROMPTS: dict[Arm, str] = {
         "list the record IDs you believe hold the answer."
     ),
 }
+# The unprimed prompts say what the task is and nothing else: no warning that a question
+# may rest on a false premise, and no instruction to look values up. The answer form
+# still needs a way to record "this cannot be answered", so its flag is described without
+# the words the primed prompt uses.
+UNPRIMED_SUBMIT_TOOL: dict[str, Any] = {
+    "name": "submit_answer",
+    "description": "Record your final answer. Call it exactly once, as your last action.",
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "answerable": {
+                "type": "boolean",
+                "description": "false if the question as asked has no correct answer",
+            },
+            "answer": {
+                "type": "string",
+                "description": "Short answer in the format the question asks; empty when "
+                "answerable is false",
+            },
+            "explanation": {"type": "string", "description": "One or two sentences"},
+            "sources": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Record IDs the answer rests on, e.g. P04637, 4HHB, AF-P04637-F1",
+            },
+        },
+        "required": ["answerable", "answer", "explanation", "sources"],
+        "additionalProperties": False,
+    },
+}
+_UNPRIMED_COMMON = (
+    "Answer in the format the question asks. Finish by calling submit_answer exactly once."
+)
+UNPRIMED_SYSTEM_PROMPTS: dict[Arm, str] = {
+    "tools": (
+        "You answer questions about proteins from public database records: UniProtKB, "
+        "RCSB PDB and AlphaFold DB. You have tools that read those databases. "
+        + _UNPRIMED_COMMON
+        + " In sources, list the record IDs your answer rests on."
+    ),
+    "closed_book": (
+        "You answer questions about proteins (UniProtKB, RCSB PDB, AlphaFold DB records) "
+        "from your own knowledge; you have no lookup tools. "
+        + _UNPRIMED_COMMON
+        + " In sources, list the record IDs you believe hold the answer."
+    ),
+}
+PROMPTS: dict[Prompt, dict[Arm, str]] = {
+    "primed": SYSTEM_PROMPTS,
+    "unprimed": UNPRIMED_SYSTEM_PROMPTS,
+}
+SUBMIT_TOOLS: dict[Prompt, dict[str, Any]] = {
+    "primed": SUBMIT_TOOL,
+    "unprimed": UNPRIMED_SUBMIT_TOOL,
+}
 NUDGE = "Call submit_answer now with your final answer."
 EARLY_SUBMIT = json.dumps(
     {
@@ -123,6 +180,7 @@ class Episode:
     question_id: str
     arm: Arm
     model: str
+    prompt: Prompt = "primed"
     status: str = "ok"
     submission: Submission | None = None
     served_by: list[str] = field(default_factory=list)
@@ -143,6 +201,7 @@ class Episode:
             "question_id": self.question_id,
             "arm": self.arm,
             "model": self.model,
+            "prompt": self.prompt,
             "status": self.status,
             "submission": self.submission.model_dump() if self.submission else None,
             "served_by": self.served_by,
@@ -199,6 +258,15 @@ def _collect_sources(result_json: str, into: set[str]) -> None:
                 into.add(str(src[key]))
 
 
+def _submission(raw: Any, prompt: Prompt) -> Submission:
+    """Validate a submit_answer call. The unprimed form names its flag `answerable`."""
+    if prompt == "unprimed" and isinstance(raw, dict):
+        if "premise_ok" in raw:
+            raise ValueError("unknown field 'premise_ok'; this form uses 'answerable'")
+        raw = {("premise_ok" if key == "answerable" else key): value for key, value in raw.items()}
+    return Submission.model_validate(raw)
+
+
 def run_episode(
     client: MessagesClient,
     fetcher: Fetcher,
@@ -208,10 +276,14 @@ def run_episode(
     effort: str = "medium",
     max_turns: int = 12,
     max_tokens: int = 16000,
+    prompt: Prompt = "primed",
 ) -> Episode:
-    episode = Episode(question_id=question.id, arm=arm, model=model)
-    tools = ([*anthropic_tool_defs(), SUBMIT_TOOL]) if arm == "tools" else [SUBMIT_TOOL]
-    system = [{"type": "text", "text": SYSTEM_PROMPTS[arm], "cache_control": {"type": "ephemeral"}}]
+    episode = Episode(question_id=question.id, arm=arm, model=model, prompt=prompt)
+    submit = SUBMIT_TOOLS[prompt]
+    tools = ([*anthropic_tool_defs(), submit]) if arm == "tools" else [submit]
+    system = [
+        {"type": "text", "text": PROMPTS[prompt][arm], "cache_control": {"type": "ephemeral"}}
+    ]
     messages: list[dict[str, Any]] = [{"role": "user", "content": question.text}]
     started = time.monotonic()
     try:
@@ -258,9 +330,9 @@ def run_episode(
                     text, is_error = EARLY_SUBMIT, True
                 elif block.name == "submit_answer":
                     try:
-                        episode.submission = Submission.model_validate(block.input)
+                        episode.submission = _submission(block.input, prompt)
                         text, is_error = '{"recorded": true}', False
-                    except ValidationError as exc:
+                    except (ValidationError, ValueError) as exc:
                         text, is_error = json.dumps({"error": str(exc)}), True
                 else:
                     text, is_error = run_tool(fetcher, block.name, block.input)

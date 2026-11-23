@@ -1,0 +1,258 @@
+{
+  "built_at": "2026-11-23",
+  "seed": 11,
+  "uniprot_release": "2026_04",
+  "alphafold_model_versions": [
+    6
+  ],
+  "questions": 175,
+  "answerable": 140,
+  "planted_false_premise": 35,
+  "planted_share": 0.2,
+  "families": {
+    "residue_at": 20,
+    "length": 8,
+    "feature_range": 10,
+    "accession_lookup": 5,
+    "isoform_residue": 5,
+    "method_resolution": 12,
+    "ligand_comp_id": 6,
+    "polymer_uniprot": 8,
+    "best_xray": 6,
+    "structure_residue": 6,
+    "modelled_residue": 6,
+    "engineered_mutation": 6,
+    "insertion_code": 6,
+    "structure_numbering": 8,
+    "variant_lookup": 6,
+    "af_fraction": 10,
+    "af_mean": 6,
+    "obsolete_replacement": 6
+  },
+  "planted_kinds": {
+    "isoform_missing": 4,
+    "no_difference": 3,
+    "unmodelled_residue": 6,
+    "author_number_as_uniprot": 3,
+    "wrong_wild_type": 5,
+    "obsolete_no_successor": 2,
+    "absent_pdb": 2,
+    "absent_accession": 2,
+    "past_end": 4,
+    "absent_feature": 4
+  },
+  "proteins": 43,
+  "reviewed": 32,
+  "unreviewed": 11,
+  "organisms": 37,
+  "excluded_organisms": {
+    "9606": "Homo sapiens",
+    "10090": "Mus musculus",
+    "10116": "Rattus norvegicus",
+    "559292": "Saccharomyces cerevisiae S288C",
+    "83333": "Escherichia coli K-12",
+    "3702": "Arabidopsis thaliana",
+    "7227": "Drosophila melanogaster",
+    "6239": "Caenorhabditis elegans",
+    "7955": "Danio rerio",
+    "9913": "Bos taurus",
+    "284812": "Schizosaccharomyces pombe 972h-",
+    "224308": "Bacillus subtilis 168"
+  },
+  "length_range": [
+    80,
+    800
+  ],
+  "strata": {
+    "rev_pdb": {
+      "what": "reviewed, annotation score 3 or lower, with a PDB structure",
+      "query": "(reviewed:true) AND (database:pdb) AND (annotation_score:1 OR annotation_score:2 OR annotation_score:3) NOT (organism_id:9606) NOT (organism_id:10090) NOT (organism_id:10116) NOT (organism_id:559292) NOT (organism_id:83333) NOT (organism_id:3702) NOT (organism_id:7227) NOT (organism_id:6239) NOT (organism_id:7955) NOT (organism_id:9913) NOT (organism_id:284812) NOT (organism_id:224308)",
+      "method": "length",
+      "drawn": [
+        "Q5SJG7",
+        "D2PPM7",
+        "Q7CPI7",
+        "P77918",
+        "Q3KSQ3",
+        "Q8JU54",
+        "P10216",
+        "P08017",
+        "Q8V3T7",
+        "P0A882",
+        "Q3HM41",
+        "G3ECR2"
+      ],
+      "passed_over": []
+    },
+    "rev_af": {
+      "what": "reviewed, annotation score 1, no PDB structure, an AlphaFold DB model",
+      "query": "(reviewed:true) AND (database:alphafolddb) AND NOT (database:pdb) AND (annotation_score:1) NOT (organism_id:9606) NOT (organism_id:10090) NOT (organism_id:10116) NOT (organism_id:559292) NOT (organism_id:83333) NOT (organism_id:3702) NOT (organism_id:7227) NOT (organism_id:6239) NOT (organism_id:7955) NOT (organism_id:9913) NOT (organism_id:284812) NOT (organism_id:224308)",
+      "method": "length",
+      "drawn": [
+        "Q8SV00",
+        "Q74CZ2",
+        "Q97TA9",
+        "P55538",
+        "Q6L5G1",
+        "O84573",
+        "Q9ZDZ8"
+      ],
+      "passed_over": [
+        {
+          "accession": "Q9ENL0",
+          "why": "no AlphaFold DB model"
+        }
+      ]
+    },
+    "unrev_pdb": {
+      "what": "unreviewed (TrEMBL), annotation score 2 or lower, with a PDB structure",
+      "query": "(reviewed:false) AND (database:pdb) AND (annotation_score:1 OR annotation_score:2) NOT (organism_id:9606) NOT (organism_id:10090) NOT (organism_id:10116) NOT (organism_id:559292) NOT (organism_id:83333) NOT (organism_id:3702) NOT (organism_id:7227) NOT (organism_id:6239) NOT (organism_id:7955) NOT (organism_id:9913) NOT (organism_id:284812) NOT (organism_id:224308)",
+      "method": "length",
+      "drawn": [
+        "O15564",
+        "Q1G1I6",
+        "G3FIN0",
+        "Q71TM4",
+        "Q9X5N2",
+        "Q9WYE8",
+        "A0A0H2V857"
+      ],
+      "passed_over": [
+        {
+          "accession": "Q2VFP3",
+          "why": "no PDB entry with a chain aligned cleanly to this accession"
+        },
+        {
+          "accession": "A0A8D0UWW0",
+          "why": "no PDB entry with a chain aligned cleanly to this accession"
+        }
+      ]
+    },
+    "unrev_af": {
+      "what": "unreviewed (TrEMBL), evidence at protein level, no PDB structure, an AlphaFold DB model",
+      "query": "(reviewed:false) AND (database:alphafolddb) AND NOT (database:pdb) AND (annotation_score:1 OR annotation_score:2) AND (existence:1) NOT (organism_id:9606) NOT (organism_id:10090) NOT (organism_id:10116) NOT (organism_id:559292) NOT (organism_id:83333) NOT (organism_id:3702) NOT (organism_id:7227) NOT (organism_id:6239) NOT (organism_id:7955) NOT (organism_id:9913) NOT (organism_id:284812) NOT (organism_id:224308)",
+      "method": "length",
+      "drawn": [
+        "A0A804NXA1",
+        "A0A804NPE5",
+        "A0A804QQH8",
+        "A0A1D6GNT8"
+      ],
+      "passed_over": []
+    },
+    "isoform": {
+      "what": "reviewed, annotation score 3 or lower, with described isoforms",
+      "query": "(reviewed:true) AND (cc_ap:*) AND (annotation_score:1 OR annotation_score:2 OR annotation_score:3) NOT (organism_id:9606) NOT (organism_id:10090) NOT (organism_id:10116) NOT (organism_id:559292) NOT (organism_id:83333) NOT (organism_id:3702) NOT (organism_id:7227) NOT (organism_id:6239) NOT (organism_id:7955) NOT (organism_id:9913) NOT (organism_id:284812) NOT (organism_id:224308)",
+      "method": "list",
+      "drawn": [
+        "P10042",
+        "Q87043",
+        "Q653S3",
+        "P15418"
+      ],
+      "passed_over": [
+        {
+          "accession": "P03500",
+          "why": "no described isoform that differs from the canonical"
+        },
+        {
+          "accession": "B4URE2",
+          "why": "no described isoform that differs from the canonical"
+        },
+        {
+          "accession": "O97018",
+          "why": "no described isoform that differs from the canonical"
+        },
+        {
+          "accession": "P0CK84",
+          "why": "no described isoform that differs from the canonical"
+        },
+        {
+          "accession": "A4GBY2",
+          "why": "no described isoform that differs from the canonical"
+        },
+        {
+          "accession": "Q288Z0",
+          "why": "no described isoform that differs from the canonical"
+        },
+        {
+          "accession": "O71155",
+          "why": "length 809 outside 80-800"
+        },
+        {
+          "accession": "Q0A3Q3",
+          "why": "no described isoform that differs from the canonical"
+        },
+        {
+          "accession": "Q5Z9S8",
+          "why": "length 1500 outside 80-800"
+        },
+        {
+          "accession": "Q6J8D2",
+          "why": "no described isoform that differs from the canonical"
+        },
+        {
+          "accession": "Q80DV1",
+          "why": "length 1164 outside 80-800"
+        }
+      ]
+    },
+    "mutagenesis": {
+      "what": "reviewed, annotation score 4 or lower, with mutagenesis records and a PDB structure",
+      "query": "(reviewed:true) AND (ft_mutagen:*) AND (database:pdb) AND (annotation_score:1 OR annotation_score:2 OR annotation_score:3 OR annotation_score:4) NOT (organism_id:9606) NOT (organism_id:10090) NOT (organism_id:10116) NOT (organism_id:559292) NOT (organism_id:83333) NOT (organism_id:3702) NOT (organism_id:7227) NOT (organism_id:6239) NOT (organism_id:7955) NOT (organism_id:9913) NOT (organism_id:284812) NOT (organism_id:224308)",
+      "method": "list",
+      "drawn": [
+        "Q9AFC7",
+        "P08325",
+        "Q9V118",
+        "Q5ZT21",
+        "Q4J9K9"
+      ],
+      "passed_over": [
+        {
+          "accession": "O81086",
+          "why": "length 817 outside 80-800"
+        },
+        {
+          "accession": "H0USY4",
+          "why": "length 23 outside 80-800"
+        }
+      ]
+    },
+    "peptidase_s1": {
+      "what": "reviewed peptidase S1 family with a PDB structure: the family where structures carry insertion codes (chymotrypsin numbering)",
+      "query": "(reviewed:true) AND (family:\"peptidase S1 family\") AND (database:pdb) NOT (organism_id:9606) NOT (organism_id:10090) NOT (organism_id:10116) NOT (organism_id:559292) NOT (organism_id:83333) NOT (organism_id:3702) NOT (organism_id:7227) NOT (organism_id:6239) NOT (organism_id:7955) NOT (organism_id:9913) NOT (organism_id:284812) NOT (organism_id:224308)",
+      "method": "list",
+      "drawn": [
+        "P09872",
+        "P98119",
+        "P00776",
+        "P16293"
+      ],
+      "passed_over": [
+        {
+          "accession": "Q7SZE1",
+          "why": "no modelled residue with an insertion code in the chains tried"
+        },
+        {
+          "accession": "Q56VR3",
+          "why": "no modelled residue with an insertion code in the chains tried"
+        },
+        {
+          "accession": "P39675",
+          "why": "no modelled residue with an insertion code in the chains tried"
+        },
+        {
+          "accession": "Q7M135",
+          "why": "no modelled residue with an insertion code in the chains tried"
+        },
+        {
+          "accession": "P15636",
+          "why": "no modelled residue with an insertion code in the chains tried"
+        }
+      ]
+    }
+  },
+  "snapshot_files": 1190,
+  "pool_files": 38
+}

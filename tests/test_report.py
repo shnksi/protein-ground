@@ -71,3 +71,21 @@ def test_report_shows_intervals_and_the_comparison() -> None:
     text = markdown(summaries, [comparison_line(summaries[0], summaries[1], result)])
     assert "100% (72–100)" in text and "60% (31–83)" in text
     assert "4 items only the first got right, 0 only the second" in text
+
+
+def test_repeated_runs_are_summarised_by_median_and_range() -> None:
+    def run(wrong: int, prompt: str) -> dict[str, Any]:
+        records = [record(f"q{i}", "wrong" if i < wrong else "correct") for i in range(10)]
+        records.append(record("trap", "correct", answerable=False))
+        return {**summarise(records), "prompt": prompt}
+
+    runs = [run(1, "unprimed"), run(3, "unprimed"), run(2, "unprimed"), run(0, "primed")]
+    text = markdown(runs)
+    # One decimal, so a bar at 90% is decided by the table and not hidden by rounding.
+    assert (
+        "| tools, unprimed | m | 3 | 80.0% [70.0–90.0] | 100.0% [100.0–100.0] | 0.0% [0.0–0.0] "
+        "| 100.0% [100.0–100.0] |"
+    ) in text
+    assert "| tools, primed | m | 1 | 100.0% [100.0–100.0] |" in text
+    assert runs[0]["premise_discrimination"] == 1.0
+    assert "Repeated runs" not in markdown([run(1, "unprimed"), run(0, "primed")])

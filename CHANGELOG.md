@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+Eval v2 (built and preregistered, not yet run)
+- `evals/v2/`: 175 questions on 43 long-tail proteins drawn from UniProtKB searches by seed (reviewed entries with low annotation scores, unreviewed entries, no model organisms), with families for the 0.2.0 tools: structure-to-sequence numbering, insertion codes, modelled residues, differences between a structure and the canonical sequence, substitutions checked with `get_variants`, isoform numbering and obsolete PDB entries. A fifth are planted false premises; each asks for something that is not there and shares its wording with an answerable twin.
+- `proteinground-eval run --prompt primed|unprimed`: `primed` is the prompt v1 ran with; `unprimed` gives no warning about false premises and no instruction to look values up. `--max-miss-episodes` stops a run that keeps reading records outside its snapshot.
+- Two answer types with their own graders and decoys: `mutation` (K123A, Lys123Ala) and `position` (a residue position, read strictly).
+- `proteinground-eval report` summarises repeated runs of one arm by their median and range, and summaries carry `premise_discrimination` (false premises caught minus false alarms).
+- Fallback models have price rows, so tokens a fallback served count toward a run's spend cap.
+- The v1 questions, snapshot, preregistration and results are untouched; the published episodes regrade to the same outcomes.
+
 ## 0.2.0
 
 Fixes

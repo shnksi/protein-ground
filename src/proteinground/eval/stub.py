@@ -13,7 +13,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-_ACCESSION = re.compile(r"\b([OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9][A-Z][A-Z0-9]{2}[0-9])\b")
+_ACCESSION = re.compile(
+    r"\b([OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})\b"
+)
 _PDB = re.compile(r"\bPDB entry ([1-9][A-Z0-9]{3})\b")
 _ids = itertools.count(1)
 
@@ -74,7 +76,11 @@ class StubMessages:
     def create(self, **params: Any) -> StubMessage:
         self.calls += 1
         messages: list[dict[str, Any]] = params["messages"]
-        tool_names = {t["name"] for t in params.get("tools", [])}
+        tools: list[dict[str, Any]] = params.get("tools", [])
+        tool_names = {t["name"] for t in tools}
+        form = next(t for t in tools if t["name"] == "submit_answer")["input_schema"]
+        # The unprimed form calls its flag `answerable`; fill in whichever this form has.
+        flag = "answerable" if "answerable" in form["properties"] else "premise_ok"
         question = str(messages[0]["content"])
         usage = StubUsage(
             input_tokens=_estimate_tokens([params.get("system"), params.get("tools"), messages]),
@@ -104,7 +110,7 @@ class StubMessages:
             id=f"stub_{next(_ids)}",
             name="submit_answer",
             input={
-                "premise_ok": self.policy != "abstain",
+                flag: self.policy != "abstain",
                 "answer": "",
                 "explanation": "stub",
                 "sources": sources,

@@ -3,6 +3,7 @@
 proteinground-eval check-gold
 proteinground-eval run --arm tools --model claude-opus-5-5 --out runs/opus-tools
 proteinground-eval run --arm tools --stub --out runs/dry-run      # zero cost
+proteinground-eval run --arm tools --prompt unprimed --out runs/opus-tools-unprimed
 proteinground-eval report runs/opus-tools runs/opus-closed
 """
 
@@ -14,7 +15,7 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
-from proteinground.eval.agent import Arm, MessagesClient, run_episode
+from proteinground.eval.agent import Arm, MessagesClient, Prompt, run_episode
 from proteinground.eval.cost import episode_cost_usd
 from proteinground.eval.goldcheck import check
 from proteinground.eval.grade import grade
@@ -68,6 +69,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     previous = load_records(args.out)
     spent = sum(r.get("cost_usd") or 0.0 for r in previous)
     refusals = sum(r["status"] == "refused" for r in previous)
+    missed = sum(bool(r.get("snapshot_misses")) for r in previous)
 
     for index, question in enumerate(questions, start=1):
         if question.id in done:
@@ -78,10 +80,16 @@ def cmd_run(args: argparse.Namespace) -> int:
         if refusals > args.max_refusals:
             print(f"STOP: {refusals} refusals exceeds --max-refusals {args.max_refusals}; review")
             break
+        if args.max_miss_episodes is not None and missed > args.max_miss_episodes:
+            print(
+                f"STOP: {missed} episodes read records outside the snapshot, more than "
+                f"--max-miss-episodes {args.max_miss_episodes}; review"
+            )
+            break
         fetcher = Fetcher(cache_dir=args.snapshot, mode=mode)
         episode = run_episode(
             client, fetcher, question, arm, args.model,
-            effort=args.effort, max_turns=args.max_turns,
+            effort=args.effort, max_turns=args.max_turns, prompt=cast(Prompt, args.prompt),
         )  # fmt: skip
         result = grade(
             question,
@@ -98,6 +106,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         record["cost_usd"] = None if args.stub else record["estimated_cost_usd"]
         spent += record["cost_usd"] or 0.0
         refusals += episode.status == "refused"
+        missed += bool(fetcher.misses)
         with out_path.open("a") as fh:
             fh.write(json.dumps(record) + "\n")
         print(
@@ -138,6 +147,13 @@ def main(argv: list[str] | None = None) -> int:
 
     run = sub.add_parser("run", help="run one arm over the question set")
     run.add_argument("--arm", choices=["tools", "closed_book"], required=True)
+    run.add_argument(
+        "--prompt",
+        choices=["primed", "unprimed"],
+        default="primed",
+        help="primed: the prompt warns of false premises and (tools arm) says to look "
+        "everything up; unprimed: it says neither",
+    )
     run.add_argument("--model", default="claude-opus-5-5")
     run.add_argument("--effort", default="medium", choices=["low", "medium", "high", "xhigh"])
     run.add_argument("--out", type=Path, required=True)
@@ -159,6 +175,12 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=3,
         help="stop the run once refusals exceed this (preregistered: 3)",
+    )
+    run.add_argument(
+        "--max-miss-episodes",
+        type=int,
+        help="stop the run once more episodes than this made a tool call the snapshot "
+        "does not hold (v2 preregistered: 5)",
     )
     run.add_argument(
         "--no-fallbacks",

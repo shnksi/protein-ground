@@ -7,7 +7,17 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-AnswerType = Literal["residue", "int", "range", "method_resolution", "float", "id_set", "token"]
+AnswerType = Literal[
+    "residue",
+    "int",
+    "range",
+    "method_resolution",
+    "float",
+    "id_set",
+    "token",
+    "mutation",
+    "position",
+]
 Outcome = Literal[
     "correct",
     "wrong",
@@ -31,7 +41,10 @@ class Question(BaseModel):
     family: str
     text: str
     premise_ok: bool
-    answer_type: AnswerType | None = Field(description="None for false-premise items")
+    answer_type: AnswerType | None = Field(
+        description="None for false-premise items, unless one answer would itself correct "
+        "the premise; that answer is then the gold"
+    )
     gold: Any = None
     tolerance: float | None = None
     record_ids: list[str] = Field(description="Records that hold the answer or refute it")
