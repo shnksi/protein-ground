@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "cap_usd": 15,
+  "spent_usd": 0.0845,
+  "reserved": [],
+  "settled": [
+    {
+      "attempt": "pilot-claude-opus-5-5-1",
+      "usd": 0.0208,
+      "reserved_usd": 0.320136,
+      "at": "2026-11-23T04:56:30.600Z",
+      "label": "pilot claude-opus-5-5 #1"
+    },
+    {
+      "attempt": "pilot-claude-opus-5-5-2",
+      "usd": 0.0088,
+      "reserved_usd": 0.320136,
+      "at": "2026-11-23T04:56:30.620Z",
+      "label": "pilot claude-opus-5-5 #2"
+    },
+    {
+      "attempt": "pilot-claude-opus-5-5-3",
+      "usd": 0.0171,
+      "reserved_usd": 0.320136,
+      "at": "2026-11-23T04:56:30.640Z",
+      "label": "pilot claude-opus-5-5 #3"
+    },
+    {
+      "attempt": "pilot-claude-opus-5-5-4",
+      "usd": 0.0169,
+      "reserved_usd": 0.320136,
+      "at": "2026-11-23T04:56:30.660Z",
+      "label": "pilot claude-opus-5-5 #4"
+    },
+    {
+      "attempt": "pilot-claude-opus-5-5-5",
+      "usd": 0.0072,
+      "reserved_usd": 0.320136,
+      "at": "2026-11-23T04:56:30.680Z",
+      "label": "pilot claude-opus-5-5 #5"
+    },
+    {
+      "attempt": "pilot-claude-opus-5-5-6",
+      "usd": 0.0137,
+      "reserved_usd": 0.320136,
+      "at": "2026-11-23T04:56:30.701Z",
+      "label": "pilot claude-opus-5-5 #6"
+    }
+  ],
+  "released": []
+}

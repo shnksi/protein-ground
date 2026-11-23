@@ -1,0 +1,23 @@
+{
+  "built_at": "2026-11-23",
+  "seed": 7,
+  "uniprot_release": "2026_04",
+  "alphafold_model_version": 6,
+  "questions": 68,
+  "answerable": 55,
+  "planted_false_premise": 13,
+  "families": {
+    "residue_at": 12,
+    "length": 5,
+    "feature_range": 8,
+    "method_resolution": 8,
+    "ligand_comp_id": 4,
+    "polymer_uniprot": 3,
+    "best_xray": 4,
+    "af_fraction": 6,
+    "af_mean": 3,
+    "accession_lookup": 2,
+    "false_premise": 13
+  },
+  "snapshot_files": 154
+}

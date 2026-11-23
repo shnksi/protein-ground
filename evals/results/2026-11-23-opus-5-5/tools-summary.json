@@ -1,0 +1,37 @@
+{
+  "arm": "tools",
+  "model": "claude-opus-5-5",
+  "items": 68,
+  "answerable": 55,
+  "planted": 13,
+  "accuracy_answerable": 1.0,
+  "false_premise_caught": 1.0,
+  "false_premise_accepted": 0.0,
+  "false_alarms": 0.0,
+  "cited_rate": 1.0,
+  "grounded_rate": 1.0,
+  "outcomes": {
+    "correct": 68
+  },
+  "mean_tool_calls": 1.03,
+  "fallbacks": 0,
+  "accuracy_answerable_named_model_only": 1.0,
+  "early_submits": 0,
+  "snapshot_misses": 0,
+  "cost_usd": 0.5946,
+  "cost_per_item_usd": 0.00874,
+  "mean_seconds": 4.5,
+  "by_family": {
+    "accession_lookup": 1.0,
+    "af_fraction": 1.0,
+    "af_mean": 1.0,
+    "best_xray": 1.0,
+    "false_premise": 1.0,
+    "feature_range": 1.0,
+    "length": 1.0,
+    "ligand_comp_id": 1.0,
+    "method_resolution": 1.0,
+    "polymer_uniprot": 1.0,
+    "residue_at": 1.0
+  }
+}
