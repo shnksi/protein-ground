@@ -9,11 +9,14 @@ import pytest
 from proteinground.eval.grade import (
     check_answer,
     grade,
+    mutations_in,
     parse_float,
     parse_int,
     parse_method,
+    parse_mutation,
     parse_range,
     parse_residue,
+    positions_in,
 )
 from proteinground.eval.schema import AnswerType, Question, Submission
 
@@ -24,11 +27,12 @@ def question(
     tolerance: float | None = None,
     premise_ok: bool = True,
     reject: list[str] | None = None,
+    text: str = "t",
 ) -> Question:
     return Question(
         id="q",
         family="f",
-        text="t",
+        text=text,
         premise_ok=premise_ok,
         answer_type=answer_type,
         gold=gold,
@@ -138,14 +142,15 @@ def natural_and_hedged(q: Question) -> tuple[list[str], list[str]]:
         other = "G" if g != "G" else "A"
         return [g, f"{g} ({THREE[g]})", f"It is {THREE[g]}."], [f"{g} or {other}"]
     if q.answer_type == "int":
-        return [str(g), f"{g} residues", f"{g:,} aa"], []
+        return [str(g), f"{g} residues", f"{g:,} aa"], [str(g + 1), f"{g - 1} residues"]
     if q.answer_type == "range":
         a, b = g
         return [f"{a}-{b}", f"residues {a}–{b}", f"{a} to {b}"], [f"{a}-{b} or {a + 1}-{b}"]
     if q.answer_type == "float" and q.family == "af_fraction":
-        return [str(g), f"{g * 100:.1f}%", f"Fraction with pLDDT above 90: {g}"], []
+        off = round(g + 0.03, 3)  # three times the tolerance
+        return [str(g), f"{g * 100:.1f}%", f"Fraction with pLDDT above 90: {g}"], [str(off)]
     if q.answer_type == "float":
-        return [str(g), f"Mean pLDDT {g}", f"about {g}"], []
+        return [str(g), f"Mean pLDDT {g}", f"about {g}"], [str(round(g + 1.5, 2))]
     if q.answer_type == "method_resolution":
         name, res = METHOD_NAME[g["method"]], g["resolution"]
         return [f"{name}, {res} Å", f"{name} at {res} Å resolution"], [f"X-ray or cryo-EM, {res} Å"]
@@ -155,7 +160,26 @@ def natural_and_hedged(q: Question) -> tuple[list[str], list[str]]:
         return [g, f"UniProtKB {g}"], [f"{g} or P69905"]
     if q.answer_type == "token":
         hedges = [f"{g} or {q.reject[0]}"] if q.reject else []
-        return [g, f"{g} ({q.text.split()[4]})"], hedges
+        return [g, f"{g} ({q.text.split()[4]})"], [*hedges, "ZZ9"]
+    if q.answer_type == "mutation":
+        wild, position, changed = g[0], int(g[1:-1]), g[-1]
+        other = "G" if changed != "G" else "A"
+        swapped = "W" if wild != "W" else "F"
+        return (
+            [g, f"p.{g}", f"{THREE[wild]}{position}{THREE[changed]}", f"The change is {g}."],
+            [
+                f"{g} or {wild}{position}{other}",
+                f"{swapped}{position}{changed}",
+                f"{changed}{position}{wild}",
+                f"{wild}{position + 1}{changed}",
+            ],
+        )
+    if q.answer_type == "position":
+        asked = q.evidence[0].input["residue_number"]  # the author number the question gave
+        return (
+            [str(g), f"Position {g}", f"{g} of the UniProtKB sequence", f"{g} (author {asked})"],
+            [f"{g} or {g + 1}", str(g + 1), f"{g} or {asked}", f"{asked} or {g}", str(asked), ""],
+        )
     raise AssertionError(q.answer_type)
 
 
@@ -192,3 +216,132 @@ def test_method_negation_and_hedges() -> None:
 def test_unicode_dashes_in_ranges() -> None:
     for text in ("712‑979", "712−979", "between 712 and 979"):
         assert parse_range(text) == (712, 979)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "K123A",
+        "p.K123A",
+        "Lys123Ala",
+        "p.Lys123Ala",
+        "K123A (Lys to Ala)",
+        "Lys123→Ala",
+        "Lys-123 -> Ala",
+        "lysine 123 to alanine",
+        "The substitution is K123A.",
+    ],
+)
+def test_mutation_passes(text: str) -> None:
+    assert parse_mutation(text) == ("K", 123, "A")
+    assert check_answer(question("mutation", "K123A"), text)[0]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "R123A",  # the wrong wild-type residue
+        "K124A",  # off by one
+        "K123G",  # the wrong replacement
+        "A123K",  # the right residues, reversed
+        "K123A or K123G",  # a hedge
+        "K123A and R123A",
+        "K123",  # no replacement named
+        "Lys123",
+        "Lys to Ala",  # no position
+        "",
+    ],
+)
+def test_mutation_decoys(text: str) -> None:
+    assert not check_answer(question("mutation", "K123A"), text)[0]
+
+
+def test_mutation_parser_skips_identifiers_and_prose() -> None:
+    assert mutations_in("Q9Y6K9") == set()  # an accession, not Q9Y
+    assert mutations_in("this 12 ala") == set()  # "his" inside a word
+    assert mutations_in("C54S (UniProtKB Cys54, structure Ser)") == {("C", 54, "S")}
+    assert mutations_in("aspartic acid 45 to Gly") == {("D", 45, "G")}
+
+
+NUMBERING = "In PDB entry 1IEP, chain A, which position does author residue number 315 map to?"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "334",
+        "Position 334",
+        "Tyr334",
+        "Y334",
+        "334 (Tyr)",
+        "Position 334 of P00520",
+        "334 in AF-P00520-F1",
+        "334 (chain A of 1IEP)",
+        "334 (author residue 315)",  # the question's own number, set aside in parentheses
+        "334 (author residue 315, insertion code A)",
+    ],
+)
+def test_position_passes(text: str) -> None:
+    assert check_answer(question("position", 334, text=NUMBERING), text)[0]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "315",  # the author number handed back as the UniProtKB position
+        "335",  # off by one
+        "334 or 335",  # a hedge
+        "334 or 315",  # a hedge between the answer and the number the question gave
+        "315 or 334",
+        "315-334",
+        "333-335",
+        "Author residue 315 is position 334",  # two numbers, neither marked as the answer
+        "315 (maps to 334)",  # the answer given is 315
+        "Tyr",  # no number
+        "",
+    ],
+)
+def test_position_decoys(text: str) -> None:
+    assert not check_answer(question("position", 334, text=NUMBERING), text)[0]
+
+
+def test_position_parser_reads_separators_and_skips_identifiers() -> None:
+    assert positions_in("1,334") == {1334}
+    assert positions_in("P00520 and 1IEP") == set()
+
+
+def test_mutation_reads_an_arrow_between_one_letter_codes() -> None:
+    assert parse_mutation("S308→Y") == ("S", 308, "Y")
+    assert parse_mutation("S308 -> Y") == ("S", 308, "Y")
+    assert mutations_in("K123 A protein") == set()
+
+
+def test_insertion_code_in_the_answer_is_not_read_as_a_residue() -> None:
+    q = question("residue", "C")
+    assert check_answer(q, "C (residue 245E, insertion code E)")[0]
+    assert check_answer(q, "Cys at 245 with insertion code E")[0]
+    assert not check_answer(q, "E")[0]
+
+
+def test_a_planted_wrong_wild_type_is_caught_by_the_true_substitution() -> None:
+    """The item names V10A where position 10 is Thr and the record is T10A."""
+    planted = question("mutation", "T10A", premise_ok=False)
+    for answer, flag, outcome in (
+        ("", False, "correct"),  # said it cannot be answered
+        ("T10A", True, "correct"),  # corrected the wild-type residue in the answer
+        ("T10A (position 10 is Thr, not Val)", True, "correct"),
+        ("V10A", True, "accepted_false_premise"),  # took the premise as given
+        ("T10A or V10A", True, "accepted_false_premise"),  # a hedge is not a correction
+        ("A", True, "accepted_false_premise"),
+        ("", True, "accepted_false_premise"),
+    ):
+        assert grade(planted, sub(answer, premise_ok=flag), "ok", None).outcome == outcome, answer
+    plain = question(None, None, premise_ok=False)
+    assert grade(plain, sub("T10A"), "ok", None).outcome == "accepted_false_premise"
+
+
+def test_ligand_hedge_between_two_component_ids_fails() -> None:
+    q = question("token", "FLC", reject=["CIT", "PLP"])
+    assert check_answer(q, "FLC")[0] and check_answer(q, "FLC (citrate anion)")[0]
+    assert not check_answer(q, "FLC or CIT")[0]
+    assert not check_answer(q, "CIT")[0]

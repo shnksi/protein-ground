@@ -18,4 +18,5 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy
       - run: uv run proteinground-eval check-gold
+      - run: uv run proteinground-eval check-gold --questions evals/v2/questions.jsonl --snapshot evals/v2/snapshot
       - run: uv run pytest

@@ -82,12 +82,69 @@ def _settles(family: str, question: Question, data: Any) -> bool:
         return bool(record.get("mean_plddt") == gold)
     if family == "accession_lookup":
         return any(hit.get("accession") == gold for hit in rows)
+    asked = question.evidence[0].input
+    if family == "isoform_residue":
+        return record.get("accession") == asked["accession"] and any(
+            r.get("position") == asked["start"] and r.get("one_letter") == gold
+            for r in record.get("residues", [])
+        )
+    if family in (
+        "structure_numbering",
+        "structure_residue",
+        "insertion_code",
+        "modelled_residue",
+    ):
+        author = f"{asked['residue_number']}{asked.get('insertion_code') or ''}"
+        if record.get("author_residue") != author or record.get("observed") is not True:
+            return False
+        if question.answer_type == "residue":
+            return bool(record.get("structure_residue") == gold)
+        return bool(
+            record.get("uniprot_position") == gold
+            and record.get("uniprot_accession") in question.record_ids
+        )
+    if family == "engineered_mutation":
+        change = (
+            f"{record.get('uniprot_residue')}{record.get('uniprot_position')}"
+            f"{record.get('structure_residue')}"
+        )
+        return record.get("matches_uniprot") is False and change == gold
+    if family == "variant_lookup":
+        return any(gold in v.get("changes", []) for v in record.get("variants", []))
     raise AssertionError(f"{question.id}: no gold check for family {family!r}")
+
+
+def _shows(output: dict[str, Any], expected: dict[str, Any]) -> bool:
+    """A structured signal: named fields of the payload, or words in the not-found note.
+
+    {"data": {...}} needs found=true and every listed field to hold that value;
+    {"note_contains": "..."} needs found=false and the phrase in the note.
+    """
+    if "note_contains" in expected:
+        note = str(output.get("note") or "")
+        return output.get("found") is False and str(expected["note_contains"]) in note
+    data = output.get("data")
+    fields = expected.get("data")
+    return (
+        output.get("found") is True
+        and isinstance(data, dict)
+        and isinstance(fields, dict)
+        and all(_contains(data.get(key), value) for key, value in fields.items())
+    )
 
 
 def check(fetcher: Fetcher, question: Question) -> str | None:
     """Return None when the tools settle the item, else a reason."""
     outputs = _outputs(fetcher, question)
+    if question.premise_ok and question.family == "obsolete_replacement":
+        # The successor is named in the not-found note, not in a data field.
+        wanted = {f"superseded by {pdb_id}" for pdb_id in question.gold}
+        if any(
+            o.get("found") is False and any(w in str(o.get("note") or "") for w in wanted)
+            for o in outputs
+        ):
+            return None
+        return f"the not-found note does not name the successor {question.gold!r}"
     if not question.premise_ok:
         expected = question.evidence_signal
         if expected == "not_found":
@@ -95,6 +152,12 @@ def check(fetcher: Fetcher, question: Question) -> str | None:
                 None
                 if any(not o.get("found", True) for o in outputs)
                 else ("expected found=false from the evidence call")
+            )
+        if isinstance(expected, dict):
+            return (
+                None
+                if any(_shows(o, expected) for o in outputs)
+                else f"evidence does not show {expected!r}"
             )
         return (
             None

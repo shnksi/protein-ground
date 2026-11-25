@@ -17,7 +17,16 @@ def test_server_exposes_the_shared_tools_read_only(offline: Fetcher) -> None:
     for tool in listed:
         spec = TOOLS[tool.name]
         assert tool.description == spec.description
-        assert set(tool.input_schema["properties"]) == set(spec.args.model_fields)
+        expected_props = spec.args.model_json_schema()["properties"]
+        actual_props = tool.input_schema["properties"]
+        assert set(actual_props) == set(expected_props)
+        for param, expected in expected_props.items():
+            actual = actual_props[param]
+            if "description" in expected:
+                assert actual.get("description") == expected["description"], (tool.name, param)
+            for bound in ("minimum", "maximum"):
+                if bound in expected:
+                    assert actual.get(bound) == expected[bound], (tool.name, param, bound)
         assert tool.annotations is not None and tool.annotations.read_only_hint
         assert tool.output_schema is not None
 

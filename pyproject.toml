@@ -5,6 +5,17 @@ description = "Cited protein facts for AI agents: an MCP server over UniProt, RC
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
+keywords = ["mcp", "proteins", "uniprot", "pdb", "alphafold", "bioinformatics", "ai-agents"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
 dependencies = [
     "httpx>=0.27",
     "mcp>=2.3,<3",
@@ -15,8 +26,15 @@ dependencies = [
 eval = ["anthropic>=2.12,<3"]
 
 [project.scripts]
+proteinground = "proteinground.server:main"
 proteinground-mcp = "proteinground.server:main"
 proteinground-eval = "proteinground.eval.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/shnksi/protein-ground"
+Repository = "https://github.com/shnksi/protein-ground"
+Issues = "https://github.com/shnksi/protein-ground/issues"
+Changelog = "https://github.com/shnksi/protein-ground/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
@@ -34,6 +52,15 @@ path = "src/proteinground/version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/proteinground"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+    "/pyproject.toml",
+]
 
 [tool.ruff]
 line-length = 100

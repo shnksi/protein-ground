@@ -39,7 +39,7 @@ class WindowArgs(_Args):
     accession: str = Field(
         description="UniProtKB accession, or an isoform ID such as P04637-2 for that isoform"
     )
-    start: int = Field(description="First position, 1-based, on the canonical sequence")
+    start: int = Field(description="First position, 1-based, on this sequence")
     end: int = Field(description="Last position, inclusive; at most 50 residues per call")
 
 
@@ -71,6 +71,12 @@ class AlphaFoldArgs(_Args):
         default=None, description="Also report confidence for the residues from here"
     )
     end: int | None = Field(default=None, description="to here, inclusive; needs start")
+    model_id: str | None = Field(
+        default=None,
+        description=(
+            "Specific AlphaFold model ID (e.g. AF-P11532-9-F1) for an isoform or fragment"
+        ),
+    )
 
 
 class MapResidueArgs(_Args):
@@ -87,11 +93,18 @@ class MapResidueArgs(_Args):
         default=None,
         description="Position on the UniProtKB sequence, to find its number in the structure",
     )
+    uniprot_accession: str | None = Field(
+        default=None,
+        description="Disambiguate a fusion chain when mapping from uniprot_position",
+    )
 
 
 class StructuresArgs(_Args):
     accession: str = Field(description="UniProtKB accession")
-    method: str | None = Field(default=None, description="'X-ray', 'EM' or 'NMR'")
+    method: str | None = Field(
+        default=None,
+        description="Method filter: 'X-ray', 'EM', 'NMR' (common names like 'cryo-EM' work)",
+    )
     limit: int = Field(default=20, ge=1, le=100)
 
 
@@ -175,7 +188,13 @@ TOOLS: dict[str, ToolSpec] = {
             "whether the residue was actually modelled." + GROUNDING,
             MapResidueArgs,
             lambda f, a: pdb.map_structure_residue(
-                f, a.pdb_id, a.chain, a.residue_number, a.insertion_code, a.uniprot_position
+                f,
+                a.pdb_id,
+                a.chain,
+                a.residue_number,
+                a.insertion_code,
+                a.uniprot_position,
+                a.uniprot_accession,
             ),
         ),
         ToolSpec(
@@ -184,7 +203,9 @@ TOOLS: dict[str, ToolSpec] = {
             "residues in each confidence band, and long low-confidence regions. Give start "
             "and end to get the confidence of one region." + GROUNDING,
             AlphaFoldArgs,
-            lambda f, a: alphafold.get_alphafold_summary(f, a.accession, a.start, a.end),
+            lambda f, a: alphafold.get_alphafold_summary(
+                f, a.accession, a.start, a.end, a.model_id
+            ),
         ),
     ]
 }

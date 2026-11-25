@@ -54,6 +54,10 @@ def low_confidence_regions(
         if score < threshold:
             if run_start is None:
                 run_start = number
+            elif previous is not None and number != previous + 1:
+                if previous - run_start + 1 >= min_len:
+                    regions.append(Region(start=run_start, end=previous))
+                run_start = number
             previous = number
             continue
         if run_start is not None and previous is not None and previous - run_start + 1 >= min_len:
@@ -81,10 +85,56 @@ def confidence_window(
     )
 
 
-def _pick_model(models: list[dict[str, Any]], accession: str) -> dict[str, Any] | None:
+def _fragment_overlap(model: dict[str, Any], start: int, end: int) -> tuple[int, int]:
+    """(covers_full_window, overlapping_residues) for a fragment against [start, end]."""
+    m_start = _int(model, "uniprotStart", "sequenceStart")
+    m_end = _int(model, "uniprotEnd", "sequenceEnd")
+    if m_start is None or m_end is None:
+        return (0, 0)
+    overlap = max(0, min(m_end, end) - max(m_start, start) + 1)
+    full = int(m_start <= start and m_end >= end)
+    return (full, overlap)
+
+
+def _matches_accession(model: dict[str, Any], accession: str) -> bool:
+    model_acc = str(model.get("uniprotAccession", "")).upper()
+    return model_acc == accession or model_acc.startswith(f"{accession}-")
+
+
+def _pick_model(
+    models: list[dict[str, Any]],
+    accession: str,
+    start: int | None = None,
+    end: int | None = None,
+    model_id: str | None = None,
+) -> dict[str, Any] | None:
+    if model_id is not None:
+        wanted = model_id.strip().upper()
+        for m in models:
+            if not _matches_accession(m, accession):
+                continue
+            if wanted in (
+                str(m.get("entryId", "")).upper(),
+                str(m.get("modelEntityId", "")).upper(),
+            ):
+                return m
+        return None
     own = [m for m in models if str(m.get("uniprotAccession", "")).upper() == accession]
     if not own:
         return None
+    if start is not None and len(own) > 1:
+        last = start if end is None else end
+        scored = sorted(
+            own,
+            key=lambda m: (
+                -_fragment_overlap(m, start, last)[0],
+                -_fragment_overlap(m, start, last)[1],
+                not str(m.get("entryId", "")).endswith("-F1"),
+                str(m.get("entryId", "")),
+            ),
+        )
+        if _fragment_overlap(scored[0], start, last)[1] > 0:
+            return scored[0]
     own.sort(key=lambda m: (not str(m.get("entryId", "")).endswith("-F1"), str(m.get("entryId"))))
     return own[0]
 
@@ -106,7 +156,11 @@ def _int(model: dict[str, Any], *keys: str) -> int | None:
 
 
 def get_alphafold_summary(
-    fetcher: Fetcher, raw_accession: str, start: int | None = None, end: int | None = None
+    fetcher: Fetcher,
+    raw_accession: str,
+    start: int | None = None,
+    end: int | None = None,
+    model_id: str | None = None,
 ) -> Cited[AlphaFoldSummary]:
     """Model confidence for an accession; start and end add the confidence of one region."""
     accession = normalise_accession(raw_accession)
@@ -119,7 +173,11 @@ def get_alphafold_summary(
     response = fetcher.get_json(prediction_url(accession))
     raise_if_rejected(response, f"AlphaFold DB {accession}")
     models = response.body if isinstance(response.body, list) else []
-    model = _pick_model(models, accession) if response.status == 200 else None
+    model = (
+        _pick_model(models, accession, start=start, end=end, model_id=model_id)
+        if response.status == 200
+        else None
+    )
     if model is None:
         checked = Source(
             database="AlphaFold DB",
@@ -127,17 +185,31 @@ def get_alphafold_summary(
             url=f"https://alphafold.ebi.ac.uk/entry/{accession}",
             retrieved_at=response.retrieved_at,
         )
-        return Cited[AlphaFoldSummary](
-            found=False,
-            note=f"AlphaFold DB has no model for {accession} (HTTP {response.status})",
-            sources=[checked],
-        )
+        available = [
+            str(m.get("entryId"))
+            for m in models
+            if _matches_accession(m, accession) and m.get("entryId")
+        ]
+        if model_id is not None and available:
+            shown = ", ".join(available[:10]) + ("..." if len(available) > 10 else "")
+            note = f"AlphaFold DB has no model '{model_id}' for {accession}; available: {shown}"
+        elif available:
+            shown = ", ".join(available[:10]) + ("..." if len(available) > 10 else "")
+            note = (
+                f"AlphaFold DB has no canonical model for {accession}, only "
+                f"{len(available)} isoform model(s) ({shown}); pass model_id to inspect one"
+            )
+        else:
+            note = f"AlphaFold DB has no model for {accession} (HTTP {response.status})"
+        return Cited[AlphaFoldSummary](found=False, note=note, sources=[checked])
     cited = source(model, response)
     regions: list[Region] = []
     window: ConfidenceWindow | None = None
     notes: list[str] = []
     numbers: list[int] = []
     scores: list[float] = []
+    others = [str(m.get("entryId")) for m in models if m is not model and m.get("entryId")]
+    residue_start = _int(model, "uniprotStart", "sequenceStart")
     doc_url = model.get("plddtDocUrl")
     if not doc_url:
         notes.append("per-residue confidence file not listed; regions omitted")
@@ -151,6 +223,9 @@ def get_alphafold_summary(
         else:
             if doc.status == 200 and isinstance(doc.body, dict):
                 numbers = [int(n) for n in doc.body.get("residueNumber", [])]
+                if residue_start and residue_start > 1 and numbers and numbers[0] == 1:
+                    offset = residue_start - 1
+                    numbers = [n + offset for n in numbers]
                 scores = [float(s) for s in doc.body.get("confidenceScore", [])]
                 regions = low_confidence_regions(numbers, scores)
             else:
@@ -162,9 +237,16 @@ def get_alphafold_summary(
         if scores:
             window = confidence_window(numbers, scores, start, last)
             if window is None:
+                extra = f"; other fragments: {', '.join(others)}" if others else ""
                 notes.append(
                     f"the model has no residues in {start}-{last}; it covers "
-                    f"{numbers[0]}-{numbers[-1]}"
+                    f"{numbers[0]}-{numbers[-1]}{extra}"
+                )
+            elif window.residues < last - start + 1:
+                extra = f"; check other fragments ({', '.join(others)})" if others else ""
+                notes.append(
+                    f"model {cited.record_id} covers {window.residues} of {last - start + 1} "
+                    f"residues in {start}-{last} (fragment spans {numbers[0]}-{numbers[-1]}){extra}"
                 )
         else:
             notes.append(f"no per-residue scores, so no confidence for {start}-{last}")
@@ -173,7 +255,6 @@ def get_alphafold_summary(
     if missing:
         notes.append(f"the AlphaFold DB record has no value for: {', '.join(missing)}")
     mean = values["mean_plddt"]
-    others = [str(m.get("entryId")) for m in models if m is not model and m.get("entryId")]
     summary = AlphaFoldSummary(
         model_id=cited.record_id,
         accession=accession,

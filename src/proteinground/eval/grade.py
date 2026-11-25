@@ -38,6 +38,22 @@ _NEGATED = re.compile(
     r"[\w\s-]*?(?=[,.;)]|$)",
     re.I,
 )
+_ONE_CLASS = "".join(sorted(_ONE))
+_NAMES = {**{three: one for three, one in _THREE.items()}, **_FULL}
+_NAME = "|".join(sorted(_NAMES, key=len, reverse=True))
+_MUTATION_ONE = re.compile(
+    rf"(?<![A-Za-z0-9])([{_ONE_CLASS}])(\d+)(?:\s*(?:→|->|>)\s*)?([{_ONE_CLASS}])(?![A-Za-z0-9])"
+)
+_MUTATION_NAMED = re.compile(
+    rf"(?<![A-Za-z])({_NAME})(?:\s+acid)?[\s-]?(\d+)[\s-]*(?:→|->|>|to\b)?\s*"
+    rf"({_NAME})(?![A-Za-z])",
+    re.I,
+)
+_THOUSANDS = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
+_RESIDUE_NUMBER = re.compile(r"([A-Za-z]{1,3})([1-9]\d*)")
+_ALPHAFOLD_ID = re.compile(r"\bAF-[A-Z0-9]+-F\d+\b", re.I)
+_PARENTHESES = re.compile(r"\([^()]*\)")
+_INSERTION_CODE = re.compile(r"\binsertion code\s+[A-Za-z]\b", re.I)
 
 
 def residues_in(text: str) -> set[str]:
@@ -122,6 +138,46 @@ def resolutions_in(text: str) -> set[float]:
     return found
 
 
+def mutations_in(text: str) -> set[tuple[str, int, str]]:
+    """Every substitution the answer names, as (from, position, to) in one-letter codes.
+
+    Reads the compact form (K123A, p.K123A) and the spelled-out ones (Lys123Ala,
+    Lys-123→Ala, lysine 123 to alanine). A bare "K123" or "Lys123" names no substitution.
+    """
+    found = {(m.group(1), int(m.group(2)), m.group(3)) for m in _MUTATION_ONE.finditer(text)}
+    for match in _MUTATION_NAMED.finditer(text):
+        found.add(
+            (_NAMES[match.group(1).upper()], int(match.group(2)), _NAMES[match.group(3).upper()])
+        )
+    return found
+
+
+def parse_mutation(text: str) -> tuple[str, int, str] | None:
+    found = mutations_in(text)
+    return found.pop() if len(found) == 1 else None
+
+
+def positions_in(text: str) -> set[int]:
+    """Every residue position the text names: bare integers, and Y334 or Tyr334.
+
+    Digits inside an identifier (1IEP, P00520, AF-P00520-F1) are not positions.
+    """
+    found: set[int] = set()
+    cleaned = _THOUSANDS.sub("", _ALPHAFOLD_ID.sub(" ", text))
+    for token in re.findall(r"[A-Za-z0-9]+", cleaned):
+        if token.isdigit():
+            found.add(int(token))
+            continue
+        match = _RESIDUE_NUMBER.fullmatch(token)
+        if not match or ACCESSION_RE.match(token.upper()):
+            continue
+        prefix = match.group(1)
+        one_letter = len(prefix) == 1 and prefix in _ONE
+        if one_letter or (len(prefix) == 3 and prefix.upper() in _THREE):
+            found.add(int(match.group(2)))
+    return found
+
+
 def _tokens(text: str) -> list[str]:
     return [t.upper() for t in re.findall(r"[A-Za-z0-9]+", text)]
 
@@ -134,7 +190,8 @@ def check_answer(question: Question, answer: str) -> tuple[bool, str]:
     if rejected:
         return False, f"answer names a rejected alternative: {', '.join(rejected)}"
     if kind == "residue":
-        got = residues_in(answer)
+        # "insertion code E" repeats the question; it does not name glutamate.
+        got = residues_in(_INSERTION_CODE.sub(" ", answer))
         return got == {gold}, f"named {sorted(got)}, gold {gold!r}"
     if kind == "int":
         got_int = parse_int(answer)
@@ -158,9 +215,23 @@ def check_answer(question: Question, answer: str) -> tuple[bool, str]:
         )  # fmt: skip
         return ok, f"methods {sorted(methods)} resolutions {sorted(resolutions)}, gold {gold}"
     if kind == "id_set":
-        ids = {m.group(0).upper() for m in _PDB_ID.finditer(answer)}
         allowed = {g.upper() for g in gold}
+        # An ID the question itself gave ("which entry superseded 1ABC?") may be repeated.
+        echoed = {m.group(0).upper() for m in _PDB_ID.finditer(question.text)} - allowed
+        ids = {m.group(0).upper() for m in _PDB_ID.finditer(answer)} - echoed
         return bool(ids) and ids <= allowed, f"named {sorted(ids)}, gold {sorted(allowed)}"
+    if kind == "mutation":
+        wanted = parse_mutation(str(gold))
+        got_mutations = mutations_in(answer)
+        return (
+            wanted is not None and got_mutations == {wanted},
+            f"substitutions {sorted(got_mutations)}, gold {gold!r}",
+        )
+    if kind == "position":
+        # Read outside parentheses only, so "99 (author residue 116)" is one answer while
+        # "99 or 116" and "author residue 116 is position 99" are two candidates and fail.
+        numbers = positions_in(_PARENTHESES.sub(" ", answer))
+        return numbers == {int(gold)}, f"positions {sorted(numbers)}, gold {gold!r}"
     if kind == "token":
         target = str(gold).upper()
         if ACCESSION_RE.match(target):
@@ -194,8 +265,17 @@ def grade(
     elif submission is None:
         outcome = "no_answer"
     elif not question.premise_ok:
-        outcome = "correct" if not submission.premise_ok else "accepted_false_premise"
-        detail = question.trap or ""
+        # A planted item is caught by saying it cannot be answered. Where the item carries
+        # a correcting answer (the true substitution for one named with the wrong wild-type
+        # residue), giving exactly that answer also shows the premise was checked.
+        corrected = (
+            submission.premise_ok
+            and question.answer_type is not None
+            and check_answer(question, submission.answer)[0]
+        )
+        caught = not submission.premise_ok or corrected
+        outcome = "correct" if caught else "accepted_false_premise"
+        detail = (question.trap or "") + (" (corrected in the answer)" if corrected else "")
     elif not submission.premise_ok:
         outcome = "false_alarm"
         detail = submission.explanation[:200]
