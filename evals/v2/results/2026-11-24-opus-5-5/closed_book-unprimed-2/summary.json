@@ -1,0 +1,73 @@
+{
+  "arm": "closed_book",
+  "prompt": "unprimed",
+  "model": "claude-opus-5-5",
+  "items": 175,
+  "answerable": 140,
+  "planted": 35,
+  "accuracy_answerable": 0.3,
+  "false_premise_caught": 0.6,
+  "false_premise_accepted": 0.4,
+  "false_alarms": 0.079,
+  "premise_discrimination": 0.521,
+  "ci95": {
+    "accuracy_answerable": [
+      0.23,
+      0.38
+    ],
+    "false_premise_caught": [
+      0.436,
+      0.744
+    ],
+    "false_alarms": [
+      0.044,
+      0.135
+    ]
+  },
+  "cited_rate": 0.977,
+  "grounded_rate": null,
+  "outcomes": {
+    "wrong": 87,
+    "correct": 63,
+    "false_alarm": 11,
+    "accepted_false_premise": 14
+  },
+  "mean_tool_calls": 0.0,
+  "fallbacks": 0,
+  "accuracy_answerable_named_model_only": 0.3,
+  "early_submits": 0,
+  "snapshot_misses": 0,
+  "cost_usd": 2.517,
+  "cost_per_item_usd": 0.01438,
+  "mean_seconds": 8.4,
+  "by_family": {
+    "accession_lookup": 0.6,
+    "af_fraction": 0.0,
+    "af_mean": 0.0,
+    "best_xray": 0.5,
+    "engineered_mutation": 0.167,
+    "false_premise.absent_accession": 0.5,
+    "false_premise.absent_feature": 1.0,
+    "false_premise.absent_pdb": 0.5,
+    "false_premise.author_number_as_uniprot": 0.333,
+    "false_premise.isoform_missing": 0.75,
+    "false_premise.no_difference": 0.667,
+    "false_premise.obsolete_no_successor": 1.0,
+    "false_premise.past_end": 1.0,
+    "false_premise.unmodelled_residue": 0.333,
+    "false_premise.wrong_wild_type": 0.2,
+    "feature_range": 0.2,
+    "insertion_code": 0.333,
+    "isoform_residue": 0.2,
+    "length": 0.25,
+    "ligand_comp_id": 1.0,
+    "method_resolution": 0.417,
+    "modelled_residue": 0.167,
+    "obsolete_replacement": 0.0,
+    "polymer_uniprot": 0.5,
+    "residue_at": 0.2,
+    "structure_numbering": 0.25,
+    "structure_residue": 0.167,
+    "variant_lookup": 0.833
+  }
+}
