@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 
 from proteinground.fetch import (
     Fetcher,
+    InvalidInputError,
     MalformedRecordError,
     RejectedRequestError,
     Response,
@@ -401,7 +402,8 @@ def _position_note(location: dict[str, Any]) -> str | None:
     return ", ".join(notes) or None
 
 
-def parse_features(body: dict[str, Any]) -> list[Feature]:
+def parse_features(body: dict[str, Any], primary: str | None = None) -> list[Feature]:
+    canonical_id = primary or str(body.get("primaryAccession") or "")
     features: list[Feature] = []
     for raw in body.get("features", []):
         location = raw.get("location", {})
@@ -409,6 +411,8 @@ def parse_features(body: dict[str, Any]) -> list[Feature]:
         ligand = raw.get("ligand", {}).get("name")
         if ligand:
             description = f"binds {ligand}" + (f"; {description}" if description else "")
+        on = str(location.get("sequence") or canonical_id)
+        isoform = on if canonical_id and on != canonical_id else None
         features.append(
             Feature(
                 type=str(raw.get("type", "")),
@@ -416,6 +420,7 @@ def parse_features(body: dict[str, Any]) -> list[Feature]:
                 end=_position(location, "end"),
                 description=description,
                 position_note=_position_note(location),
+                isoform=isoform,
             )
         )
     return features
@@ -478,12 +483,14 @@ def get_features(
             note=f"position {position} is outside {primary}, which has {length} residues",
             sources=result.sources,
         )
-    features = parse_features(body)
+    features = parse_features(body, primary)
     available = sorted({f.type for f in features})
     if wanted:
         features = [f for f in features if f.type == wanted]
+    isoform_skipped = 0
     if position is not None:
-        features = [f for f in features if _covers(f, position)]
+        isoform_skipped = sum(f.isoform is not None for f in features)
+        features = [f for f in features if f.isoform is None and _covers(f, position)]
     listing = FeatureList(
         accession=primary,
         sequence_length=length,
@@ -493,16 +500,24 @@ def get_features(
         available_types=available,
     )
     filtered = wanted is not None or position is not None
-    note = result.note
+    notes: list[str] = [result.note] if result.note else []
     if filtered and not features:
         what = f"'{wanted}' features" if wanted else "features of the types this tool retrieves"
         where = f" at position {position}" if position is not None else ""
-        note = (
+        notes.append(
             f"no {what} are annotated{where} on this entry; "
             f"types present: {', '.join(available) or 'none'}"
         )
+    if isoform_skipped:
+        notes.append(
+            f"{isoform_skipped} isoform-numbered feature(s) were not matched against canonical "
+            f"position {position}"
+        )
     return Cited[FeatureList](
-        found=bool(features) or not filtered, data=listing, note=note, sources=result.sources
+        found=bool(features) or not filtered,
+        data=listing,
+        note="; ".join(notes) or None,
+        sources=result.sources,
     )
 
 
@@ -517,7 +532,7 @@ def parse_variants(body: dict[str, Any], primary: str) -> list[Variant]:
         change = raw.get("alternativeSequence") or {}
         original = str(change["originalSequence"]) if change.get("originalSequence") else None
         alternatives = [str(a) for a in change.get("alternativeSequences") or []]
-        description = str(raw["description"])[:300] if raw.get("description") else None
+        description = str(raw["description"])[:500] if raw.get("description") else None
         on = str(location.get("sequence") or primary)
         canonical = on == primary
         if not canonical:  # numbered on an isoform, so it is not a canonical position
@@ -540,6 +555,7 @@ def parse_variants(body: dict[str, Any], primary: str) -> list[Variant]:
                     for x in raw.get("featureCrossReferences", [])
                     if x.get("database") == "dbSNP" and x.get("id")
                 ],
+                isoform=None if canonical else on,
             )
         )
     variants.sort(key=lambda v: (v.start or 0, v.kind, v.feature_id or ""))
@@ -562,8 +578,13 @@ def get_variants(
     every = parse_variants(body, primary)
     hits = [
         v for v in every
-        if v.start is not None and v.end is not None and v.start <= last and v.end >= start
+        if v.isoform is None
+        and v.start is not None
+        and v.end is not None
+        and v.start <= last
+        and v.end >= start
     ]  # fmt: skip
+    isoform_count = sum(v.isoform is not None for v in every)
     if result.note:
         notes.insert(0, result.note)
     span = f"position {start}" if start == last else f"positions {start}-{last}"
@@ -573,6 +594,11 @@ def get_variants(
         notes.append(
             f"UniProtKB annotates no natural variant or mutagenesis record at {span} of "
             f"{primary}. {CURATED_SUBSET}"
+        )
+    if isoform_count:
+        notes.append(
+            f"{isoform_count} isoform-numbered variant record(s) on this entry are excluded "
+            "from canonical position matching"
         )
     listing = VariantList(
         accession=primary,
@@ -587,6 +613,41 @@ def get_variants(
     return Cited[VariantList](
         found=True, data=listing, note="; ".join(notes), sources=result.sources
     )
+
+
+STRUCTURE_METHODS = ("X-ray", "EM", "NMR", "Neutron", "Fiber", "Model", "Other")
+_METHOD_ALIASES = {
+    "x ray": "X-ray",
+    "xray": "X-ray",
+    "x ray diffraction": "X-ray",
+    "xray diffraction": "X-ray",
+    "x ray crystallography": "X-ray",
+    "xray crystallography": "X-ray",
+    "crystal": "X-ray",
+    "crystallography": "X-ray",
+    "em": "EM",
+    "cryo em": "EM",
+    "cryoem": "EM",
+    "electron microscopy": "EM",
+    "cryo electron microscopy": "EM",
+    "3dem": "EM",
+    "nmr": "NMR",
+    "solution nmr": "NMR",
+    "solid state nmr": "NMR",
+    "nuclear magnetic resonance": "NMR",
+    "neutron": "Neutron",
+    "neutron diffraction": "Neutron",
+    "fiber": "Fiber",
+    "fiber diffraction": "Fiber",
+    "model": "Model",
+    "other": "Other",
+}
+
+
+def resolve_structure_method(raw: str) -> str | None:
+    """Map natural method names ('cryo-EM', 'X-RAY DIFFRACTION') to UniProt's PDB xref label."""
+    key = re.sub(r"[\s_-]+", " ", raw.strip().lower())
+    return _METHOD_ALIASES.get(key)
 
 
 def _resolution(raw: str | None) -> float | None:
@@ -620,10 +681,24 @@ def list_structures(
     body, result = fetch_entry(fetcher, accession)
     if body is None:
         return Cited[StructureRefList](found=False, note=result.note, sources=result.sources)
-    refs = parse_pdb_xrefs(body)
-    if method:
-        wanted = method.strip().lower().replace("-", "")
-        refs = [r for r in refs if (r.method or "").lower().replace("-", "") == wanted]
+    all_refs = parse_pdb_xrefs(body)
+    present_methods = sorted({r.method for r in all_refs if r.method})
+    refs = all_refs
+    wanted: str | None = None
+    if method and method.strip():
+        wanted = resolve_structure_method(method)
+        if wanted is None:
+            return Cited[StructureRefList](
+                found=False,
+                note=(
+                    f"'{method}' is not a recognised PDB method filter (supported: "
+                    f"{', '.join(STRUCTURE_METHODS)}), so this says nothing about whether "
+                    f"structures exist; methods present on this entry: "
+                    f"{', '.join(present_methods) or 'none'}"
+                ),
+                sources=result.sources,
+            )
+        refs = [r for r in all_refs if (r.method or "").lower() == wanted.lower()]
     limit = max(1, min(limit, 100))
     listing = StructureRefList(
         accession=_primary(body),
@@ -633,9 +708,13 @@ def list_structures(
     )
     note = result.note
     if not refs:
-        note = "UniProtKB cross-references no PDB structures" + (
-            f" with method '{method}'" if method else ""
-        )
+        if wanted:
+            note = (
+                f"UniProtKB cross-references no PDB structures with method '{wanted}'; "
+                f"methods present: {', '.join(present_methods) or 'none'}"
+            )
+        else:
+            note = "UniProtKB cross-references no PDB structures"
     return Cited[StructureRefList](
         found=bool(refs), data=listing, note=note, sources=result.sources
     )
@@ -648,6 +727,8 @@ def search(
     reviewed_only: bool = True,
     limit: int = 5,
 ) -> Cited[list[ProteinHit]]:
+    if not query.strip():
+        raise InvalidInputError("query cannot be empty")
     limit = max(1, min(limit, 25))
     url = search_url(query, taxon_id, reviewed_only, limit)
     response = fetcher.get_json(url)
@@ -676,5 +757,13 @@ def search(
             )
         )
         sources.append(source(accession, response))
-    note = None if hits else "no UniProtKB entries matched"
+    if hits:
+        note = None
+    elif reviewed_only:
+        note = (
+            "no reviewed (Swiss-Prot) UniProtKB entries matched; retry with "
+            "reviewed_only=False to include unreviewed (TrEMBL) entries"
+        )
+    else:
+        note = "no UniProtKB entries matched"
     return Cited[list[ProteinHit]](found=bool(hits), data=hits, note=note, sources=sources)

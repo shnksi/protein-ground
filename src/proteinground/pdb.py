@@ -40,10 +40,12 @@ PDB_ID_RE = re.compile(r"^[1-9][A-Z0-9]{3}$")
 _ASYM_RE = re.compile(r"^[A-Za-z0-9]{1,8}$")
 MAX_POLYMERS = 100
 MAX_LIGANDS = 40
-# Common crystallisation additives. Kept in the ligand list, but flagged so an agent
-# does not mistake glycerol for the drug.
+# Common crystallisation additives vs metal ions that may be catalytic/structural cofactors.
+# Both stay in the ligand list, flagged so an agent does not mistake glycerol for a drug
+# or blindly dismiss a catalytic zinc or magnesium ion.
+METAL_IONS = frozenset({"ZN", "MG", "CA", "MN", "FE", "CU"})
 ADDITIVES = frozenset(
-    {"HOH", "SO4", "PO4", "GOL", "EDO", "CL", "NA", "K", "MG", "CA", "ZN", "ACT", "PEG",
+    {"HOH", "SO4", "PO4", "GOL", "EDO", "CL", "NA", "K", "ACT", "PEG",
      "DMS", "FMT", "IOD", "BR", "NO3", "MPD", "TRS", "EPE", "MES"}
 )  # fmt: skip
 # The query text is part of the cache key: editing it means re-recording the snapshot.
@@ -196,11 +198,22 @@ def _entities(fetcher: Fetcher, pdb_id: str) -> dict[str, Any]:
     return entry
 
 
+def _organisms(raw: dict[str, Any]) -> tuple[str | None, int | None]:
+    items = raw.get("rcsb_entity_source_organism") or []
+    names: list[str] = []
+    for item in items:
+        name = item.get("ncbi_scientific_name")
+        if name and str(name) not in names:
+            names.append(str(name))
+    taxon = items[0].get("ncbi_taxonomy_id") if items else None
+    return ("; ".join(names) or None), taxon
+
+
 def _polymers(entry: dict[str, Any]) -> list[PolymerEntity]:
     polymers: list[PolymerEntity] = []
     for raw in entry.get("polymer_entities") or []:
         ids = raw.get("rcsb_polymer_entity_container_identifiers") or {}
-        organisms = raw.get("rcsb_entity_source_organism") or [{}]
+        organism, taxon_id = _organisms(raw)
         poly = raw.get("entity_poly") or {}
         chains = [
             str((inst.get("rcsb_polymer_entity_instance_container_identifiers") or {})
@@ -213,8 +226,8 @@ def _polymers(entry: dict[str, Any]) -> list[PolymerEntity]:
                 description=(raw.get("rcsb_polymer_entity") or {}).get("pdbx_description"),
                 polymer_type=poly.get("rcsb_entity_polymer_type"),
                 chains=sorted((c for c in chains if c), key=_id_key),
-                organism=organisms[0].get("ncbi_scientific_name"),
-                taxon_id=organisms[0].get("ncbi_taxonomy_id"),
+                organism=organism,
+                taxon_id=taxon_id,
                 length=poly.get("rcsb_sample_sequence_length"),
                 mutation=(raw.get("rcsb_polymer_entity") or {}).get("pdbx_mutation"),
                 uniprot_accessions=[str(a) for a in ids.get("uniprot_ids") or []],
@@ -233,14 +246,27 @@ def _ligands(entry: dict[str, Any]) -> list[Ligand]:
         if not comp_id:
             continue
         name = nonpoly.get("name")
-        if comp_id in ADDITIVES and name:
-            name = f"{name} (common additive or ion)"
+        if name:
+            if comp_id in METAL_IONS:
+                name = f"{name} (metal ion; may be a cofactor or crystallisation additive)"
+            elif comp_id in ADDITIVES:
+                name = f"{name} (common additive or ion)"
         chains = sorted((str(c) for c in ids.get("auth_asym_ids") or []), key=_id_key)
         ligands.append(
             (str(ids.get("entity_id", "")), Ligand(comp_id=str(comp_id), name=name, chains=chains))
         )
     ligands.sort(key=lambda pair: _id_key(pair[0]))
     return [ligand for _, ligand in ligands]
+
+
+def _refine_float(body: dict[str, Any], key: str) -> float | None:
+    refine = body.get("refine") or []
+    if not refine or not isinstance(refine[0], dict):
+        return None
+    value = refine[0].get(key)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return round(float(value), 4)
 
 
 def get_structure(fetcher: Fetcher, raw_id: str) -> Cited[StructureEntry]:
@@ -258,6 +284,8 @@ def get_structure(fetcher: Fetcher, raw_id: str) -> Cited[StructureEntry]:
         title=body.get("struct", {}).get("title"),
         methods=[str(e.get("method")) for e in body.get("exptl", []) if e.get("method")],
         resolution_angstrom=float(resolutions[0]) if resolutions else None,
+        r_free=_refine_float(body, "ls_R_factor_R_free"),
+        r_work=_refine_float(body, "ls_R_factor_R_work"),
         deposit_date=_date(body.get("rcsb_accession_info", {}).get("deposit_date")),
         release_date=_date(body.get("rcsb_accession_info", {}).get("initial_release_date")),
         polymer_entities=polymers[:MAX_POLYMERS],
@@ -425,7 +453,11 @@ def _load_chain(fetcher: Fetcher, pdb_id: str, author_id: str, asym_id: str) -> 
 
 
 def _locate(
-    chain: _Chain, pdb_id: str, author_residue: str | None, uniprot_position: int | None
+    chain: _Chain,
+    pdb_id: str,
+    author_residue: str | None,
+    uniprot_position: int | None,
+    uniprot_accession: str | None = None,
 ) -> tuple[int, _Segment | None] | str:
     """Find the construct position asked for, or say why this chain does not have it."""
     where = f"chain {chain.author_id} of {pdb_id}"
@@ -440,14 +472,24 @@ def _locate(
         return seq_id, (aligned[0] if aligned else None)
     assert uniprot_position is not None
     hits = [s for s in chain.segments if s.seq_id(uniprot_position) is not None]
+    if uniprot_accession is not None:
+        wanted_acc = uniprot.normalise_accession(uniprot_accession)
+        hits = [s for s in hits if s.accession.upper() == wanted_acc]
     accessions = sorted({s.accession for s in hits})
     if len(accessions) > 1:
         return (
             f"{where} is a fusion of {', '.join(accessions)}, and position {uniprot_position} "
-            f"exists in more than one of them; {chain.describe()}"
+            f"exists in more than one of them; pass uniprot_accession to disambiguate; "
+            f"{chain.describe()}"
         )
     if not hits:
-        return f"{where} does not include UniProtKB position {uniprot_position}; {chain.describe()}"
+        for_acc = (
+            f" of {uniprot.normalise_accession(uniprot_accession)}" if uniprot_accession else ""
+        )
+        return (
+            f"{where} does not include UniProtKB position {uniprot_position}{for_acc}; "
+            f"{chain.describe()}"
+        )
     found = hits[0].seq_id(uniprot_position)
     assert found is not None
     return found, hits[0]
@@ -526,6 +568,7 @@ def map_structure_residue(
     residue_number: int | None = None,
     insertion_code: str | None = None,
     uniprot_position: int | None = None,
+    uniprot_accession: str | None = None,
 ) -> Cited[ResidueMapping]:
     """Translate between a chain's author numbering and UniProtKB positions.
 
@@ -550,12 +593,14 @@ def map_structure_residue(
             sources=result.sources,
         )
     author_residue = (
-        None if residue_number is None else f"{residue_number}{(insertion_code or '').strip()}"
+        None
+        if residue_number is None
+        else f"{residue_number}{(insertion_code or '').strip().upper()}"
     )
     misses: list[str] = []
     for author_id, asym_id in candidates:  # an author chain ID can name more than one polymer
         loaded = _load_chain(fetcher, pdb_id, author_id, asym_id)
-        located = _locate(loaded, pdb_id, author_residue, uniprot_position)
+        located = _locate(loaded, pdb_id, author_residue, uniprot_position, uniprot_accession)
         if isinstance(located, str):
             misses.append(located)
             continue

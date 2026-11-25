@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable
-from typing import ParamSpec, TypeVar
+from typing import Annotated, ParamSpec, TypeVar
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
+from pydantic.fields import FieldInfo
 
 from proteinground import alphafold, pdb, uniprot
 from proteinground.fetch import Fetcher, InvalidInputError, OfflineMissError, UpstreamError
@@ -42,6 +43,11 @@ INSTRUCTIONS = (
 
 P = ParamSpec("P")
 R = TypeVar("R")
+
+
+def _field(tool_name: str, param_name: str) -> FieldInfo:
+    """Reuse each parameter's description and bounds from the shared tool schema."""
+    return TOOLS[tool_name].args.model_fields[param_name]
 
 
 def _reported(fn: Callable[P, R]) -> Callable[P, R]:
@@ -75,63 +81,100 @@ def build_server(fetcher: Fetcher | None = None) -> MCPServer:
     @mcp.tool(description=describe("search_proteins"), annotations=read_only)
     @_reported
     def search_proteins(
-        query: str, taxon_id: int | None = None, reviewed_only: bool = True, limit: int = 5
+        query: Annotated[str, _field("search_proteins", "query")],
+        taxon_id: Annotated[int | None, _field("search_proteins", "taxon_id")] = None,
+        reviewed_only: Annotated[bool, _field("search_proteins", "reviewed_only")] = True,
+        limit: Annotated[int, _field("search_proteins", "limit")] = 5,
     ) -> Cited[list[ProteinHit]]:
         return uniprot.search(f, query, taxon_id, reviewed_only, limit)
 
     @mcp.tool(description=describe("get_protein"), annotations=read_only)
     @_reported
-    def get_protein(accession: str) -> Cited[ProteinSummary]:
+    def get_protein(
+        accession: Annotated[str, _field("get_protein", "accession")],
+    ) -> Cited[ProteinSummary]:
         return uniprot.get_protein(f, accession)
 
     @mcp.tool(description=describe("get_sequence_window"), annotations=read_only)
     @_reported
-    def get_sequence_window(accession: str, start: int, end: int) -> Cited[SequenceWindow]:
+    def get_sequence_window(
+        accession: Annotated[str, _field("get_sequence_window", "accession")],
+        start: Annotated[int, _field("get_sequence_window", "start")],
+        end: Annotated[int, _field("get_sequence_window", "end")],
+    ) -> Cited[SequenceWindow]:
         return uniprot.get_sequence_window(f, accession, start, end)
 
     @mcp.tool(description=describe("get_features"), annotations=read_only)
     @_reported
     def get_features(
-        accession: str, feature_type: str | None = None, position: int | None = None
+        accession: Annotated[str, _field("get_features", "accession")],
+        feature_type: Annotated[str | None, _field("get_features", "feature_type")] = None,
+        position: Annotated[int | None, _field("get_features", "position")] = None,
     ) -> Cited[FeatureList]:
         return uniprot.get_features(f, accession, feature_type, position)
 
     @mcp.tool(description=describe("get_variants"), annotations=read_only)
     @_reported
-    def get_variants(accession: str, start: int, end: int | None = None) -> Cited[VariantList]:
+    def get_variants(
+        accession: Annotated[str, _field("get_variants", "accession")],
+        start: Annotated[int, _field("get_variants", "start")],
+        end: Annotated[int | None, _field("get_variants", "end")] = None,
+    ) -> Cited[VariantList]:
         return uniprot.get_variants(f, accession, start, end)
 
     @mcp.tool(description=describe("list_structures"), annotations=read_only)
     @_reported
     def list_structures(
-        accession: str, method: str | None = None, limit: int = 20
+        accession: Annotated[str, _field("list_structures", "accession")],
+        method: Annotated[str | None, _field("list_structures", "method")] = None,
+        limit: Annotated[int, _field("list_structures", "limit")] = 20,
     ) -> Cited[StructureRefList]:
         return uniprot.list_structures(f, accession, method, limit)
 
     @mcp.tool(description=describe("get_structure"), annotations=read_only)
     @_reported
-    def get_structure(pdb_id: str) -> Cited[StructureEntry]:
+    def get_structure(
+        pdb_id: Annotated[str, _field("get_structure", "pdb_id")],
+    ) -> Cited[StructureEntry]:
         return pdb.get_structure(f, pdb_id)
 
     @mcp.tool(description=describe("map_structure_residue"), annotations=read_only)
     @_reported
     def map_structure_residue(
-        pdb_id: str,
-        chain: str,
-        residue_number: int | None = None,
-        insertion_code: str | None = None,
-        uniprot_position: int | None = None,
+        pdb_id: Annotated[str, _field("map_structure_residue", "pdb_id")],
+        chain: Annotated[str, _field("map_structure_residue", "chain")],
+        residue_number: Annotated[
+            int | None, _field("map_structure_residue", "residue_number")
+        ] = None,
+        insertion_code: Annotated[
+            str | None, _field("map_structure_residue", "insertion_code")
+        ] = None,
+        uniprot_position: Annotated[
+            int | None, _field("map_structure_residue", "uniprot_position")
+        ] = None,
+        uniprot_accession: Annotated[
+            str | None, _field("map_structure_residue", "uniprot_accession")
+        ] = None,
     ) -> Cited[ResidueMapping]:
         return pdb.map_structure_residue(
-            f, pdb_id, chain, residue_number, insertion_code, uniprot_position
+            f,
+            pdb_id,
+            chain,
+            residue_number,
+            insertion_code,
+            uniprot_position,
+            uniprot_accession,
         )
 
     @mcp.tool(description=describe("get_alphafold_summary"), annotations=read_only)
     @_reported
     def get_alphafold_summary(
-        accession: str, start: int | None = None, end: int | None = None
+        accession: Annotated[str, _field("get_alphafold_summary", "accession")],
+        start: Annotated[int | None, _field("get_alphafold_summary", "start")] = None,
+        end: Annotated[int | None, _field("get_alphafold_summary", "end")] = None,
+        model_id: Annotated[str | None, _field("get_alphafold_summary", "model_id")] = None,
     ) -> Cited[AlphaFoldSummary]:
-        return alphafold.get_alphafold_summary(f, accession, start, end)
+        return alphafold.get_alphafold_summary(f, accession, start, end, model_id)
 
     return mcp
 

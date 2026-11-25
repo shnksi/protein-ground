@@ -11,6 +11,7 @@ import gzip
 import hashlib
 import json
 import os
+import threading
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -132,6 +133,7 @@ class Fetcher:
         retries: int = 2,
         ttl_days: float | None = None,
         negative_ttl_days: float | None = None,
+        track_urls: bool = True,
     ) -> None:
         """ttl_days and negative_ttl_days apply in cache-first mode only. None keeps a
         cached record forever, which is what a frozen eval snapshot wants; the MCP server
@@ -143,6 +145,7 @@ class Fetcher:
         self.retries = retries
         self.ttl_days = ttl_days
         self.negative_ttl_days = negative_ttl_days
+        self._track_urls = track_urls
         self._client = client or httpx.Client(
             timeout=httpx.Timeout(30.0, connect=10.0),
             headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
@@ -157,14 +160,16 @@ class Fetcher:
         mode = Mode(os.environ.get("PROTEINGROUND_MODE", Mode.CACHE_FIRST.value))
         ttl = float(os.environ.get("PROTEINGROUND_CACHE_TTL_DAYS", "7"))
         return cls(
-            cache_dir=Path(raw_dir) if raw_dir else None,
+            cache_dir=Path(raw_dir).expanduser() if raw_dir else None,
             mode=mode,
             ttl_days=ttl,
             negative_ttl_days=min(ttl, 1.0),
+            track_urls=False,
         )
 
     def get_json(self, url: str) -> Response:
-        self.urls_seen.append(url)
+        if self._track_urls:
+            self.urls_seen.append(url)
         if self.cache_dir is not None and self.mode is not Mode.LIVE:
             cached = self._read(url)
             if cached is not None and not self._expired(cached):
@@ -185,6 +190,7 @@ class Fetcher:
     def _fetch(self, url: str) -> Response:
         last_error = "no attempt made"
         for attempt in range(self.retries + 1):
+            retry_after: float | None = None
             try:
                 raw = self._client.get(url)
             except httpx.TransportError as exc:
@@ -202,8 +208,11 @@ class Fetcher:
                 last_error = f"HTTP {raw.status_code}"
                 if raw.status_code not in RETRY_STATUSES:
                     break
+                if raw.status_code == 429:
+                    retry_after = _retry_after_seconds(raw.headers.get("retry-after"))
             if attempt < self.retries:
-                time.sleep(1.5 * (attempt + 1))
+                delay = retry_after if retry_after is not None else 1.5 * (attempt + 1)
+                time.sleep(delay)
         raise UpstreamError(f"{url}: {last_error}")
 
     def _expired(self, cached: Response) -> bool:
@@ -251,9 +260,23 @@ class Fetcher:
         }
         path = cache_path(self.cache_dir, response.url)
         data = json.dumps(record, separators=(",", ":"), ensure_ascii=False).encode()
-        partial = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-        partial.write_bytes(gzip.compress(data, mtime=0))
-        os.replace(partial, path)  # atomic, so a concurrent reader never sees half a file
+        partial = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+        try:
+            partial.write_bytes(gzip.compress(data, mtime=0))
+            os.replace(partial, path)  # atomic, so a concurrent reader never sees half a file
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
+
+
+def _retry_after_seconds(header: str | None) -> float | None:
+    if not header:
+        return None
+    try:
+        seconds = float(header.strip())
+    except ValueError:
+        return None
+    return max(0.0, min(seconds, 30.0))
 
 
 def _parse_body(raw: httpx.Response) -> Any:

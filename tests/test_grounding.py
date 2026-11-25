@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
+import httpx
 import pytest
 
 from proteinground import alphafold, pdb, uniprot
-from proteinground.fetch import Fetcher
+from proteinground.fetch import Fetcher, InvalidInputError, Mode
 from proteinground.tools import run_tool
 
 
@@ -202,3 +204,180 @@ def test_new_tools_run_through_the_registry(offline: Fetcher) -> None:
         offline, "map_structure_residue", {"pdb_id": "4HHB", "chain": "B", "residue_number": 6}
     )
     assert not is_error and json.loads(text)["data"]["uniprot_position"] == 7
+
+
+def test_list_structures_resolves_method_aliases_and_rejects_unknown(offline: Fetcher) -> None:
+    em = uniprot.list_structures(offline, "P04637", method="cryo-EM")
+    assert em.found and em.data is not None and all(s.method == "EM" for s in em.data.structures)
+    xray = uniprot.list_structures(offline, "P04637", method="X-RAY DIFFRACTION")
+    assert (
+        xray.found
+        and xray.data is not None
+        and all(s.method == "X-ray" for s in xray.data.structures)
+    )
+    unknown = uniprot.list_structures(offline, "P04637", method="microED")
+    assert not unknown.found
+    assert unknown.note is not None and "not a recognised PDB method" in unknown.note
+    assert "X-ray" in unknown.note
+
+
+def test_isoform_numbered_variants_and_features_do_not_collide_with_canonical() -> None:
+    body: dict[str, Any] = {
+        "primaryAccession": "P04637",
+        "sequence": {"value": "M" * 20},
+        "features": [
+            {
+                "type": "Natural variant",
+                "location": {"start": {"value": 10}, "end": {"value": 10}, "sequence": "P04637-2"},
+                "alternativeSequence": {"originalSequence": "A", "alternativeSequences": ["V"]},
+                "description": "isoform-specific",
+            },
+            {
+                "type": "Domain",
+                "location": {"start": {"value": 5}, "end": {"value": 15}, "sequence": "P04637-2"},
+                "description": "isoform domain",
+            },
+        ],
+    }
+    f = Fetcher(
+        None,
+        Mode.LIVE,
+        httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=body))),
+    )
+    variants = uniprot.get_variants(f, "P04637", 10)
+    assert variants.found and variants.data is not None and variants.data.variants == []
+    assert variants.note is not None and "isoform-numbered variant" in variants.note
+    features = uniprot.get_features(f, "P04637", position=10)
+    assert not features.found
+    assert features.note is not None and "isoform-numbered feature" in features.note
+
+
+def test_alphafold_selects_covering_fragment_for_long_proteins() -> None:
+    models = [
+        {
+            "uniprotAccession": "Q8WZ42",
+            "entryId": "AF-Q8WZ42-F1",
+            "latestVersion": 6,
+            "uniprotStart": 1,
+            "uniprotEnd": 1400,
+            "globalMetricValue": 70.0,
+            "fractionPlddtVeryHigh": 0.4,
+            "fractionPlddtConfident": 0.3,
+            "fractionPlddtLow": 0.2,
+            "fractionPlddtVeryLow": 0.1,
+            "plddtDocUrl": "https://alphafold.ebi.ac.uk/files/AF-Q8WZ42-F1-confidence.json",
+        },
+        {
+            "uniprotAccession": "Q8WZ42",
+            "entryId": "AF-Q8WZ42-F2",
+            "latestVersion": 6,
+            "uniprotStart": 201,
+            "uniprotEnd": 1600,
+            "globalMetricValue": 85.0,
+            "fractionPlddtVeryHigh": 0.6,
+            "fractionPlddtConfident": 0.2,
+            "fractionPlddtLow": 0.1,
+            "fractionPlddtVeryLow": 0.1,
+            "plddtDocUrl": "https://alphafold.ebi.ac.uk/files/AF-Q8WZ42-F2-confidence.json",
+        },
+    ]
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.endswith("/Q8WZ42"):
+            return httpx.Response(200, json=models)
+        if "F2-confidence" in url:
+            return httpx.Response(
+                200,
+                json={"residueNumber": list(range(201, 1601)), "confidenceScore": [91.0] * 1400},
+            )
+        return httpx.Response(
+            200, json={"residueNumber": list(range(1, 1401)), "confidenceScore": [70.0] * 1400}
+        )
+
+    f = Fetcher(None, Mode.LIVE, httpx.Client(transport=httpx.MockTransport(handle)))
+    auto = alphafold.get_alphafold_summary(f, "Q8WZ42", start=1500, end=1550)
+    assert auto.found and auto.data is not None
+    assert auto.data.model_id == "AF-Q8WZ42-F2"
+    assert auto.data.window is not None and auto.data.window.residues == 51
+    assert auto.data.other_models == ["AF-Q8WZ42-F1"]
+
+    explicit = alphafold.get_alphafold_summary(f, "Q8WZ42", model_id="af-q8wz42-f2")
+    assert explicit.found and explicit.data is not None and explicit.data.model_id == "AF-Q8WZ42-F2"
+
+    missing = alphafold.get_alphafold_summary(f, "Q8WZ42", model_id="AF-Q8WZ42-F99")
+    assert not missing.found and "AF-Q8WZ42-F2" in (missing.note or "")
+
+
+def test_alphafold_isoform_only_entry_names_models_and_accepts_model_id() -> None:
+    models = [
+        {
+            "uniprotAccession": "P11532-9",
+            "entryId": "AF-P11532-9-F1",
+            "latestVersion": 6,
+            "uniprotStart": 1,
+            "uniprotEnd": 525,
+            "globalMetricValue": 82.5,
+            "fractionPlddtVeryHigh": 0.5,
+            "fractionPlddtConfident": 0.3,
+            "fractionPlddtLow": 0.1,
+            "fractionPlddtVeryLow": 0.1,
+        }
+    ]
+    f = Fetcher(
+        None,
+        Mode.LIVE,
+        httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=models))),
+    )
+    canonical = alphafold.get_alphafold_summary(f, "P11532")
+    assert not canonical.found and "AF-P11532-9-F1" in (canonical.note or "")
+    chosen = alphafold.get_alphafold_summary(f, "P11532", model_id="AF-P11532-9-F1")
+    assert chosen.found and chosen.data is not None and chosen.data.model_id == "AF-P11532-9-F1"
+
+
+def test_low_confidence_regions_splits_on_numbering_gaps() -> None:
+    numbers = [1, 2, 3, 4, 5, 20, 21, 22, 23, 24]
+    scores = [30.0] * 10
+    assert alphafold.low_confidence_regions(numbers, scores, min_len=6) == []
+
+
+def test_lowercase_insertion_code_and_r_factors_and_search_hint(offline: Fetcher) -> None:
+    mapped = pdb.map_structure_residue(offline, "1PPB", "H", residue_number=60, insertion_code="a")
+    assert mapped.found and mapped.data is not None and mapped.data.author_residue == "60A"
+
+    structure = pdb.get_structure(offline, "1IEP")
+    assert structure.found and structure.data is not None
+    assert structure.data.r_free is not None and 0.1 < structure.data.r_free < 0.4
+    assert structure.data.r_work is not None and 0.1 < structure.data.r_work < 0.4
+
+    empty_search = Fetcher(
+        None,
+        Mode.LIVE,
+        httpx.Client(
+            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"results": []}))
+        ),
+    )
+    with pytest.raises(InvalidInputError, match="empty"):
+        uniprot.search(empty_search, "   ")
+    no_hits = uniprot.search(empty_search, "obscure_protein", reviewed_only=True)
+    assert not no_hits.found and "reviewed_only=False" in (no_hits.note or "")
+
+
+def test_fusion_chain_can_be_disambiguated_by_uniprot_accession() -> None:
+    chain = pdb._Chain(
+        author_id="A",
+        asym_id="A",
+        entity_id="1",
+        description="fusion",
+        organism="Homo sapiens",
+        mutation=None,
+        numbering=["1", "2", "3", "4"],
+        sequence="MACK",
+        segments=[pdb._Segment("P11111", 1, 10, 2), pdb._Segment("P22222", 3, 10, 2)],
+        unobserved=[],
+    )
+    ambiguous = pdb._locate(chain, "1ABC", None, 10)
+    assert isinstance(ambiguous, str) and "uniprot_accession" in ambiguous
+    resolved = pdb._locate(chain, "1ABC", None, 10, "p22222")
+    assert not isinstance(resolved, str) and resolved[0] == 3 and resolved[1] is not None
+    assert resolved[1].accession == "P22222"

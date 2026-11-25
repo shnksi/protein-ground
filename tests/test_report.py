@@ -50,6 +50,11 @@ def test_paired_test_counts_only_the_items_the_arms_disagree_on() -> None:
     assert same is not None and same["p_value_exact"] == 1.0 and same["gap_points"] == 0.0
     assert paired(first, [record("other", "correct")]) is None  # no shared items
 
+    huge_a = [record(f"q{i}", "correct") for i in range(40)]
+    huge_b = [record(f"q{i}", "wrong", arm="closed_book") for i in range(40)]
+    tiny = paired(huge_a, huge_b)
+    assert tiny is not None and 0.0 < tiny["p_value_exact"] < 1e-10
+
 
 def test_paired_test_ignores_planted_items() -> None:
     first = [record("a", "correct"), record("trap", "correct", answerable=False)]

@@ -41,9 +41,9 @@ Language models answer protein questions fluently, and often wrongly: a residue 
 | `get_features` | UniProtKB | domains, signal peptides, active and binding sites, disulfides, with positions; filter by type or by residue position |
 | `get_variants` | UniProtKB | the wild-type residue and the curated natural variants and mutagenesis records at a position or short range |
 | `list_structures` | UniProtKB → PDB | cross-referenced structures, best resolution first |
-| `get_structure` | RCSB PDB | method, resolution, dates, each polymer's chain IDs, organism and UniProtKB accession, bound ligands |
+| `get_structure` | RCSB PDB | method, resolution, R-free/R-work, dates, each polymer's chain IDs, organism and UniProtKB accession, bound ligands |
 | `map_structure_residue` | RCSB PDB + UniProtKB | a residue's number in a chain ↔ its UniProtKB position, the residue in both, whether they agree, whether it was modelled |
-| `get_alphafold_summary` | AlphaFold DB | mean pLDDT, the share of residues in each confidence band, long low-confidence regions, and the confidence of a region you name |
+| `get_alphafold_summary` | AlphaFold DB | mean pLDDT, the share of residues in each confidence band, long low-confidence regions, and the confidence of a region (or specific isoform/fragment model) |
 
 Design choices, each aimed at a known way agents go wrong:
 
@@ -116,7 +116,7 @@ Metrics per arm: accuracy on answerable items, false premises caught and accepte
 
 ### Results
 
-Claude Opus 5.5, 23 Nov 2026, all 68 items per arm, one run each. Measured on v0.1.0 (commit `737b8f8`) with its seven tools; the tools added in v0.2.0 have not been through a paid run. Full write-up and records: [`evals/results/2026-11-23-opus-5-5/`](evals/results/2026-11-23-opus-5-5/RESULTS.md).
+Claude Opus 5.5, 23 Nov 2026, all 68 items per arm, one run each. Measured on v0.1.0 (commit `737b8f8`) with its seven tools; the tools added in v0.2.0 were first run in eval v2, below. Full write-up and records: [`evals/results/2026-11-23-opus-5-5/`](evals/results/2026-11-23-opus-5-5/RESULTS.md).
 
 | Arm | Answerable correct (95% interval) | False premise caught (95% interval) | False alarms | Grounded | Cost / item |
 |---|---|---|---|---|---|
@@ -129,7 +129,36 @@ The arms answer the same questions, so they are compared item by item: 12 items 
 
 The whole run cost $1.38. With the tools, every answer was right and grounded in a record fetched during that episode, with about one lookup per question. The closed-book misses are values that can't be memorised: all six AlphaFold confidence fractions, most best-resolution structures (the record has moved on since training), and a signal-peptide boundary off by one.
 
-Five of the six preregistered bars passed. The one that missed: the tools-minus-memory gap was 22 points against a preregistered 30 (the interval reaches 30, so the set cannot rule the bar in or out; it was scored as a miss, as preregistered). Opus 5.5 recalled residues, lengths, ligand IDs and every planted premise for these famous proteins from memory. So this set shows the tools are reliable and grounded; it does not show a large lift over a strong model's memory. That needs a harder set of less-studied proteins, which is the next version.
+Five of the six preregistered bars passed. The one that missed: the tools-minus-memory gap was 22 points against a preregistered 30 (the interval reaches 30, so the set cannot rule the bar in or out; it was scored as a miss, as preregistered). Opus 5.5 recalled residues, lengths, ligand IDs and every planted premise for these famous proteins from memory. So this set shows the tools are reliable and grounded; it does not show a large lift over a strong model's memory. That needs a harder set of less-studied proteins, which is eval v2.
+
+### Eval v2: long-tail proteins, with and without the warning
+
+v1 left two questions open: do the tools help where memory fails, and does an agent check when nothing tells it to? v2 asks both.
+
+- **175 questions on 43 little-studied proteins**, drawn by seed from UniProtKB searches that leave out twelve model organisms (reviewed entries with low annotation scores, and unreviewed entries). No protein was picked by hand.
+- **Families for the v0.2.0 tools**, next to v1's: structure-to-sequence numbering, insertion codes, modelled residues, differences from the canonical sequence, substitutions, isoform numbering and obsolete PDB entries.
+- **35 planted false premises (20%)**, 23 of them subtle: a mutagenesis record named with the wrong wild-type residue, an author residue number passed off as the UniProtKB position, a residue with no coordinates, an isoform that does not exist. Each shares its wording with an answerable twin.
+- **Two prompts.** `primed` is the prompt v1 ran with. `unprimed` gives no warning about false premises and no instruction to look values up.
+- **Three runs** of each arm under each prompt, because one run cannot separate a real difference from sampling noise.
+
+Bars, arms and stop rules were frozen in [`evals/v2/PREREG.md`](evals/v2/PREREG.md) before the pilot.
+
+Claude Opus 5.5, 23 to 24 Nov 2026, tools v0.2.0, harness at commit `7c5d635`. Median of three runs, with the lowest and highest run in brackets. Full write-up and records: [`evals/v2/results/2026-11-24-opus-5-5/`](evals/v2/results/2026-11-24-opus-5-5/RESULTS.md).
+
+| Arm, prompt | Answerable correct (140) | False premise caught (35) | False alarms | Grounded | Cost / item |
+|---|---|---|---|---|---|
+| tools, unprimed | **100.0%** [100.0–100.0] | **91.4%** [91.4–91.4] | 0.0% | 100% | $0.0106 |
+| closed_book, unprimed | 32.9% [30.0–35.7] | 60.0% [51.4–65.7] | 7.9% [7.9–10.7] | – | $0.0144 |
+| tools, primed | 100.0% [100.0–100.0] | 100.0% [100.0–100.0] | 0.0% | 100% | $0.0104 |
+| closed_book, primed | 32.9% [30.0–33.6] | 48.6% [45.7–54.3] | 2.1% [1.4–2.1] | – | $0.0132 |
+
+The headline is the unprimed pair. From memory, Opus 5.5 answered a third of these questions; with the tools it answered all 140 in all six runs, with about 1.1 lookups per question. In each of the three paired runs, 90 to 98 answerable items were right only with the tools and none only without (exact paired test, p below 1e-26 in every pair); the gap is 64 to 70 points. The twelve runs cost $25.77 with the pilot.
+
+With no warning in the prompt, the tools arm still caught 32 of the 35 planted premises in every run, with no false alarms. The three it missed are the same every time: an author residue number said to be the same UniProtKB position. The model looked the mapping up, gave the residue at the author number, and wrote the correction in its explanation without setting the flag. The grader reads the flag, so these count as accepted. With the warning it set the flag on all three.
+
+Closed book caught more planted premises without the warning (60.0% against 48.6%) and raised more false alarms (7.9% against 2.1%): it uses the flag to say it does not know. Read by hand, 19 of its 62 unprimed catches set the flag only because it could not recall the record, against none of the tools arm's.
+
+Nine of the ten preregistered bars passed. The one that missed is run-to-run spread: closed book under the unprimed prompt ranged over 5.7 points of answerable accuracy (42, 46 and 50 of 140) against a bar of 5. As preregistered, differences smaller than that cannot be read from these runs. The gaps between the arms are more than ten times larger.
 
 ### Run it
 
@@ -142,6 +171,9 @@ export ANTHROPIC_API_KEY=...
 uv run proteinground-eval run --arm tools --model claude-opus-5-5 --cap-usd 12 --out runs/opus-tools
 uv run proteinground-eval run --arm closed_book --model claude-opus-5-5 --cap-usd 3 --out runs/opus-closed
 uv run proteinground-eval report runs/opus-tools runs/opus-closed
+
+# eval v2: name its questions and snapshot, and pick a prompt
+uv run proteinground-eval run --arm tools --prompt unprimed --questions evals/v2/questions.jsonl --snapshot evals/v2/snapshot --cap-usd 5 --max-miss-episodes 17 --out runs/v2/tools-unprimed-1
 ```
 
 Runs resume where they stopped. `--ids` runs chosen items, `--no-fallbacks` measures the named model only, and `--strict-offline` fails any tool call that misses the snapshot. Rebuild the set with fresh residue positions with `uv run python evals/build_questions.py --seed 8 --refresh`.
@@ -150,21 +182,23 @@ Runs resume where they stopped. `--ids` runs chosen items, `--no-fallbacks` meas
 
 ```bash
 uv sync --extra eval
-uv run pytest            # 113 tests, offline against the snapshot
+uv run pytest            # 187 tests, offline against the snapshot
 uv run mypy              # strict
 uv run ruff check . && uv run ruff format --check .
 ```
 
 ## Limits
 
-- 68 items is small, and each arm ran once on one model. One answerable item is 1.8 points; the intervals above are wide for that reason. Treat differences under about 10 points as noise.
-- The eval prompt tells the model that some questions hide a false premise and, in the tools arm, to look every value up. The caught and grounded rates therefore measure behaviour when asked to be careful, not unprompted. Each "caught" explanation in the published run was read by hand and rejects the premise for the right reason; the grader itself only checks that the premise was rejected.
-- The eval covers the seven v0.1.0 tools. `get_variants` and `map_structure_residue` are covered by tests against recorded responses, not by a model run.
+- v1 is 68 items, and each arm ran once. One answerable item is 1.8 points; its intervals are wide for that reason, so treat v1 differences under about 10 points as noise. v2 is 175 items run three times; its closed-book runs ranged over as much as 5.7 points, and smaller differences cannot be read. Both are one model.
+- The primed prompt tells the model that some questions hide a false premise and, in the tools arm, to look every value up. v1's caught and grounded rates therefore measure behaviour when asked to be careful, not unprompted. v2's unprimed prompt drops both, but the answer form still has a flag and the tool descriptions still say what `found: false` means: "unprimed" means no warning from the prompt, not no hint at all.
+- The grader only checks that the premise was rejected. Every planted item's explanation in both published runs was read by hand; the v2 results page has the count.
+- v1 covers the seven v0.1.0 tools. `get_variants` and `map_structure_residue` were first run by a model in v2.
+- v2's proteins are one seeded draw, even over sequence lengths and not over entries, with one stratum (peptidase S1) chosen for its insertion codes. The results describe that draw, not UniProtKB as a whole.
 - `get_variants` reads UniProtKB's curated variants, which are a subset of what ClinVar and gnomAD hold. An empty result is reported as "none annotated", never as "does not occur".
 - Residue mapping uses the alignment RCSB PDB publishes for each entity. A chain with no UniProtKB alignment (many antibodies, designed proteins) maps to nothing, and says so. Feature annotations are canonical-sequence only: an isoform ID works for sequence windows, not for features or variants.
 - The questions are public, so later models may have trained on them. Rebuild with a new seed before reusing the numbers.
 - Live mode drifts: new PDB entries change "best resolution", and the two unassigned PDB IDs may be assigned one day. The snapshot keeps them fixed.
-- The set is saturated for a tool-using agent (100%) and mostly memorisable for closed-book Opus 5.5 (78%). It checks that the tools work and that answers are grounded; it can't rank strong agents against each other.
+- Both sets are saturated for a tool-using agent (100% of answerable items), and v1 is mostly memorisable for closed-book Opus 5.5 (78%). They check that the tools work, that answers are grounded and, in v2, that memory is no substitute; they can't rank strong agents or tool surfaces against each other.
 - Data licences: UniProtKB and AlphaFold DB under CC BY 4.0, RCSB PDB under CC0 (see `evals/snapshot/README.md`).
 
 Built with Claude Code. MIT licence.

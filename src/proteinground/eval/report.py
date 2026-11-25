@@ -63,13 +63,14 @@ def paired(first: list[dict[str, Any]], second: list[dict[str, Any]]) -> dict[st
     gap = (first_only - second_only) / n
     # Wald interval for a paired difference: rough at this size, so it is labelled as such.
     half = 1.96 * math.sqrt(max(0.0, discordant - (first_only - second_only) ** 2 / n)) / n
+    p_reported = float(f"{p_value:.2e}") if 0.0 < p_value < 0.0001 else round(p_value, 4)
     return {
         "items": n,
         "first_only_correct": first_only,
         "second_only_correct": second_only,
         "gap_points": round(100 * gap, 1),
         "gap_points_ci95_approx": [round(100 * (gap - half), 1), round(100 * (gap + half), 1)],
-        "p_value_exact": round(p_value, 4),
+        "p_value_exact": p_reported,
     }
 
 

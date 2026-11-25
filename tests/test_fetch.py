@@ -96,3 +96,25 @@ def test_cache_first_rechecks_expired_records(tmp_path: Path) -> None:
     keep = Fetcher(tmp_path, Mode.CACHE_FIRST, client(httpx.MockTransport(handle)))
     keep.get_json(URL)
     assert calls == 2  # no TTL: the snapshot keeps it
+
+
+def test_from_env_expands_tilde_and_disables_url_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PROTEINGROUND_CACHE_DIR", "~/.cache/proteinground-test")
+    monkeypatch.setenv("PROTEINGROUND_MODE", "cache-first")
+    f = Fetcher.from_env()
+    assert f.cache_dir is not None and f.cache_dir.is_absolute()
+    assert not str(f.cache_dir).startswith("~")
+    assert f._track_urls is False
+
+
+def test_429_respects_retry_after_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    slept: list[float] = []
+    monkeypatch.setattr("proteinground.fetch.time.sleep", slept.append)
+    replies = iter(
+        [httpx.Response(429, headers={"Retry-After": "4"}), httpx.Response(200, json={"ok": True})]
+    )
+    f = Fetcher(None, Mode.LIVE, client(httpx.MockTransport(lambda r: next(replies))))
+    assert f.get_json(URL).ok
+    assert slept == [4.0]

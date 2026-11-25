@@ -78,6 +78,10 @@ class Feature(BaseModel):
     position_note: str | None = Field(
         default=None, description="Set when UniProt marks a boundary as uncertain or unknown"
     )
+    isoform: str | None = Field(
+        default=None,
+        description="Set when UniProt annotates this feature on a non-canonical isoform",
+    )
 
 
 class FeatureList(BaseModel):
@@ -99,6 +103,9 @@ class Variant(BaseModel):
     description: str | None
     feature_id: str | None
     dbsnp: list[str]
+    isoform: str | None = Field(
+        default=None, description="Set when numbered on a non-canonical isoform"
+    )
 
 
 class VariantList(BaseModel):
@@ -154,6 +161,8 @@ class StructureEntry(BaseModel):
     title: str | None
     methods: list[str]
     resolution_angstrom: float | None
+    r_free: float | None = Field(default=None, description="X-ray free R-factor, when refined")
+    r_work: float | None = Field(default=None, description="X-ray working R-factor, when refined")
     deposit_date: str | None
     release_date: str | None
     polymer_entities: list[PolymerEntity]
