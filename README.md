@@ -61,16 +61,16 @@ The tool surface is defined once (`src/proteinground/tools.py`) and shared by th
 
 ## Install
 
+Run directly from PyPI with `uvx` (63 KB pure-Python wheel, Python 3.11+):
+
 ```bash
-git clone https://github.com/shnksi/protein-ground && cd protein-ground
-uv sync
-uv run proteinground-mcp        # MCP over stdio
+uvx proteinground               # MCP over stdio
 ```
 
 Add it to Claude Code:
 
 ```bash
-claude mcp add proteinground -- uvx --from git+https://github.com/shnksi/protein-ground proteinground-mcp
+claude mcp add proteinground -- uvx proteinground
 ```
 
 Or to an MCP client config:
@@ -80,14 +80,22 @@ Or to an MCP client config:
   "mcpServers": {
     "proteinground": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/shnksi/protein-ground", "proteinground-mcp"],
+      "args": ["proteinground"],
       "env": { "PROTEINGROUND_CACHE_DIR": "~/.cache/proteinground" }
     }
   }
 }
 ```
 
-`PROTEINGROUND_CACHE_DIR` keeps a replayable copy of every response. `PROTEINGROUND_MODE` is `cache-first` (default), `live`, `replay` or `offline`.
+Or install from source for development or running the eval:
+
+```bash
+git clone https://github.com/shnksi/protein-ground && cd protein-ground
+uv sync
+uv run proteinground            # MCP over stdio (proteinground-mcp also works)
+```
+
+`PROTEINGROUND_CACHE_DIR` (supports `~`) keeps a replayable copy of every response. `PROTEINGROUND_MODE` is `cache-first` (default), `live`, `replay` or `offline`.
 
 ## The eval
 
@@ -199,6 +207,8 @@ uv run ruff check . && uv run ruff format --check .
 - The questions are public, so later models may have trained on them. Rebuild with a new seed before reusing the numbers.
 - Live mode drifts: new PDB entries change "best resolution", and the two unassigned PDB IDs may be assigned one day. The snapshot keeps them fixed.
 - Both sets are saturated for a tool-using agent (100% of answerable items), and v1 is mostly memorisable for closed-book Opus 5.5 (78%). They check that the tools work, that answers are grounded and, in v2, that memory is no substitute; they can't rank strong agents or tool surfaces against each other.
-- Data licences: UniProtKB and AlphaFold DB under CC BY 4.0, RCSB PDB under CC0 (see `evals/snapshot/README.md`).
+- Data licences: UniProtKB and AlphaFold DB under CC BY 4.0, RCSB PDB under CC0 (see `evals/snapshot/README.md` and `evals/v2/snapshot/README.md`).
+
+Sibling project for Chai-1 (`chai-lab`) pre-flight validation and output auditing: [chai-ground](https://github.com/shnksi/chai-ground).
 
 Built with Claude Code. MIT licence.
